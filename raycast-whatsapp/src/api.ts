@@ -4,7 +4,7 @@ export interface Contact {
   id: string;
   name: string;
   number: string;
-  isMyContact: boolean;
+  isGroup: boolean;
 }
 
 export interface Message {
@@ -13,6 +13,8 @@ export interface Message {
   fromMe: boolean;
   timestamp: number;
   from: string;
+  hasMedia: boolean;
+  mediaData?: string;
 }
 
 export interface Chat {

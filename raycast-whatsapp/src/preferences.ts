@@ -1,7 +1,7 @@
 import { getPreferenceValues } from "@raycast/api";
 
 export interface Preferences {
-  favoriteNumbers: string;
+  favoriteContacts: string;
   servicePort: string;
 }
 
@@ -9,13 +9,13 @@ export function getPreferences(): Preferences {
   return getPreferenceValues<Preferences>();
 }
 
-export function getFavoriteNumbers(): string[] {
-  const { favoriteNumbers } = getPreferences();
-  if (!favoriteNumbers) return [];
+export function getFavoriteContacts(): string[] {
+  const { favoriteContacts } = getPreferences();
+  if (!favoriteContacts) return [];
   
-  return favoriteNumbers
+  return favoriteContacts
     .split(",")
-    .map((n) => n.trim())
+    .map((n) => n.trim().toLowerCase())
     .filter((n) => n.length > 0);
 }
 

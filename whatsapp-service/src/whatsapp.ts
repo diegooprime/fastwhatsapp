@@ -44,6 +44,10 @@ class WhatsAppClient {
       this.status = "disconnected";
     });
 
+    this.client.on("loading_screen", (percent, message) => {
+      console.log(`[WhatsApp] Loading: ${percent}% - ${message}`);
+    });
+
     this.client.on("ready", () => {
       console.log("[WhatsApp] Client is ready");
       this.status = "ready";
@@ -53,6 +57,14 @@ class WhatsAppClient {
       console.log("[WhatsApp] Disconnected:", reason);
       this.status = "disconnected";
       this.currentQR = null;
+    });
+
+    this.client.on("change_state", (state) => {
+      console.log("[WhatsApp] State changed:", state);
+    });
+
+    this.client.on("message", (msg) => {
+      console.log("[WhatsApp] Message received from:", msg.from);
     });
   }
 
@@ -71,22 +83,24 @@ class WhatsAppClient {
     return await QRCode.toDataURL(this.currentQR);
   }
 
-  async getContacts(): Promise<Array<{ id: string; name: string; number: string; isMyContact: boolean }>> {
+  async getContacts(): Promise<Array<{ id: string; name: string; number: string; isGroup: boolean }>> {
     if (this.status !== "ready") {
       throw new Error("Client not ready");
     }
 
-    const contacts = await this.client.getContacts();
+    const chats = await this.client.getChats();
     
-    return contacts
-      .filter((c) => c.isWAContact && c.id.user)
-      .map((c) => ({
-        id: c.id._serialized,
-        name: c.name || c.pushname || c.id.user,
-        number: c.id.user,
-        isMyContact: c.isMyContact,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    // Include both individual chats and groups
+    const contactList = chats
+      .filter((chat) => chat.id._serialized)
+      .map((chat) => ({
+        id: chat.id._serialized,
+        name: chat.name || chat.id.user || chat.id._serialized,
+        number: chat.id.user || "",
+        isGroup: chat.isGroup,
+      }));
+
+    return contactList.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async getChats(): Promise<Array<{ id: string; name: string; unreadCount: number; lastMessage?: string }>> {
@@ -110,6 +124,8 @@ class WhatsAppClient {
     fromMe: boolean;
     timestamp: number;
     from: string;
+    hasMedia: boolean;
+    mediaData?: string;
   }>> {
     if (this.status !== "ready") {
       throw new Error("Client not ready");
@@ -118,13 +134,34 @@ class WhatsAppClient {
     const chat = await this.client.getChatById(chatId);
     const messages = await chat.fetchMessages({ limit });
 
-    return messages.map((msg) => ({
-      id: msg.id._serialized,
-      body: msg.body,
-      fromMe: msg.fromMe,
-      timestamp: msg.timestamp,
-      from: msg.from,
-    }));
+    const result = await Promise.all(
+      messages.map(async (msg) => {
+        let mediaData: string | undefined;
+        
+        if (msg.hasMedia) {
+          try {
+            const media = await msg.downloadMedia();
+            if (media) {
+              mediaData = `data:${media.mimetype};base64,${media.data}`;
+            }
+          } catch {
+            // Failed to download media
+          }
+        }
+
+        return {
+          id: msg.id._serialized,
+          body: msg.body,
+          fromMe: msg.fromMe,
+          timestamp: msg.timestamp,
+          from: msg.from,
+          hasMedia: msg.hasMedia,
+          mediaData,
+        };
+      })
+    );
+
+    return result;
   }
 
   async sendMessage(chatId: string, message: string): Promise<{ success: boolean; messageId?: string }> {

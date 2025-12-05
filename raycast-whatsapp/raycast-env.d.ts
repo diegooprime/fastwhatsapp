@@ -8,8 +8,8 @@
 /* eslint-disable @typescript-eslint/ban-types */
 
 type ExtensionPreferences = {
-  /** Favorite Numbers - Comma-separated phone numbers with country code (e.g., +1234567890,+0987654321) */
-  "favoriteNumbers"?: string,
+  /** Favorite Contacts - Comma-separated contact names (case-insensitive partial match) */
+  "favoriteContacts": string,
   /** Service Port - Port for the local WhatsApp service */
   "servicePort": string
 }

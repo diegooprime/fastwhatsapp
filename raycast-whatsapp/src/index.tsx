@@ -6,13 +6,11 @@ import {
   showToast,
   Toast,
   useNavigation,
-  getPreferenceValues,
 } from "@raycast/api";
 import { useState, useEffect, useMemo } from "react";
 import { api, Contact, ConnectionStatus } from "./api";
-import { getFavoriteNumbers } from "./preferences";
-import { ComposeMessage } from "./compose";
-import { ConversationView } from "./conversation";
+import { getFavoriteContacts } from "./preferences";
+import { ChatView } from "./chat";
 import { QRCodeView } from "./qr";
 
 export default function Command() {
@@ -22,7 +20,7 @@ export default function Command() {
   const [searchText, setSearchText] = useState("");
   const { push } = useNavigation();
 
-  const favoriteNumbers = useMemo(() => getFavoriteNumbers(), []);
+  const favoriteNames = useMemo(() => getFavoriteContacts(), []);
 
   useEffect(() => {
     checkStatus();
@@ -64,58 +62,59 @@ export default function Command() {
     }
   }
 
-  // Filter and sort contacts
+  // Filter and sort contacts - only show favorites unless searching
   const { favorites, others } = useMemo(() => {
-    const filtered = searchText
-      ? contacts.filter(
-          (c) =>
-            c.name.toLowerCase().includes(searchText.toLowerCase()) ||
-            c.number.includes(searchText)
-        )
-      : contacts;
+    const isSearching = searchText.length > 0;
+    
+    // Check if contact matches any favorite name
+    const isFavorite = (contact: Contact) =>
+      favoriteNames.some((fav) => contact.name.toLowerCase().includes(fav));
 
     const favs: Contact[] = [];
     const rest: Contact[] = [];
 
-    filtered.forEach((contact) => {
-      const isFavorite = favoriteNumbers.some(
-        (fav) => contact.number.includes(fav.replace(/\D/g, "")) || fav.includes(contact.number)
-      );
-      if (isFavorite) {
-        favs.push(contact);
-      } else {
-        rest.push(contact);
+    contacts.forEach((contact) => {
+      if (isFavorite(contact)) {
+        // Always include favorites if they match search (or no search)
+        if (!isSearching || contact.name.toLowerCase().includes(searchText.toLowerCase())) {
+          favs.push(contact);
+        }
+      } else if (isSearching) {
+        // Only show non-favorites when searching
+        if (
+          contact.name.toLowerCase().includes(searchText.toLowerCase()) ||
+          contact.number.includes(searchText)
+        ) {
+          rest.push(contact);
+        }
       }
     });
 
     return { favorites: favs, others: rest };
-  }, [contacts, searchText, favoriteNumbers]);
+  }, [contacts, searchText, favoriteNames]);
 
   function ContactItem({ contact }: { contact: Contact }) {
     return (
       <List.Item
         key={contact.id}
         title={contact.name}
-        subtitle={contact.number}
-        icon={Icon.Person}
-        accessories={contact.isMyContact ? [{ icon: Icon.Star }] : []}
+        subtitle={contact.isGroup ? "Group" : undefined}
+        icon={contact.isGroup ? Icon.TwoPeople : Icon.Person}
         actions={
           <ActionPanel>
-            <Action
-              title="Send Message"
+            <Action.Push
+              title="Open Chat"
               icon={Icon.Message}
-              onAction={() => push(<ComposeMessage contact={contact} />)}
+              target={<ChatView contact={contact} />}
             />
-            <Action
-              title="View Conversation"
-              icon={Icon.Eye}
-              onAction={() => push(<ConversationView contact={contact} />)}
-            />
-            <Action.CopyToClipboard
-              title="Copy Number"
-              content={contact.number}
-              shortcut={{ modifiers: ["cmd"], key: "c" }}
-            />
+            {!contact.isGroup && (
+              <Action.OpenInBrowser
+                title="Video Call"
+                icon={Icon.Video}
+                url={`https://wa.me/${contact.number}?video=1`}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
+              />
+            )}
           </ActionPanel>
         }
       />

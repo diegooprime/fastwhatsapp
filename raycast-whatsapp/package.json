@@ -16,12 +16,12 @@
   ],
   "preferences": [
     {
-      "name": "favoriteNumbers",
-      "title": "Favorite Numbers",
-      "description": "Comma-separated phone numbers with country code (e.g., +1234567890,+0987654321)",
+      "name": "favoriteContacts",
+      "title": "Favorite Contacts",
+      "description": "Comma-separated contact names (case-insensitive partial match)",
       "type": "textfield",
       "required": false,
-      "placeholder": "+1234567890,+0987654321"
+      "default": "Danielota,Benjamin,Bucanero,mis guapos,Diego G"
     },
     {
       "name": "servicePort",
