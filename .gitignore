@@ -15,8 +15,10 @@ dist/
 .idea/
 .vscode/
 
-# WhatsApp session (sensitive)
+# WhatsApp session & cache (sensitive)
 .whatsapp-raycast/
+.wwebjs_cache/
+.wwebjs_auth/
 
 # Raycast
 .raycast/
