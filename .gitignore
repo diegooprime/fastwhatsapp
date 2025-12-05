@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+
+# Logs
+*.log
+/tmp/
+
+# OS files
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# WhatsApp session (sensitive)
+.whatsapp-raycast/
+
+# Raycast
+.raycast/

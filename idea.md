@@ -3,28 +3,28 @@ overview: Build a Raycast extension backed by a local Node.js service running wh
 todos:
   - id: service-setup
     content: Create whatsapp-service with Express + whatsapp-web.js + session persistence
-    status: pending
+    status: completed
   - id: service-endpoints
     content: "Implement REST endpoints: status, qr, contacts, messages, send, send-image"
-    status: pending
+    status: completed
   - id: launchd
     content: Create LaunchAgent plist for auto-start on Mac login
-    status: pending
+    status: completed
   - id: raycast-scaffold
     content: Scaffold Raycast extension with preferences for favorites and port
-    status: pending
+    status: completed
   - id: raycast-main
     content: Build main contacts list view with favorites + search
-    status: pending
+    status: completed
   - id: raycast-compose
     content: Build compose message form with clipboard image detection
-    status: pending
+    status: completed
   - id: raycast-convo
     content: Build conversation view showing last 10 messages
-    status: pending
+    status: completed
   - id: raycast-qr
     content: Build QR code scanning flow for first-time auth
-    status: pending
+    status: completed
 ---
 
 # WhatsApp Raycast Extension

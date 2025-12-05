@@ -1,0 +1,58 @@
+{
+  "name": "whatsapp",
+  "title": "WhatsApp",
+  "description": "Send WhatsApp messages quickly with keyboard shortcuts",
+  "icon": "💬",
+  "author": "diego",
+  "categories": ["Communication"],
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "index",
+      "title": "WhatsApp",
+      "description": "Open WhatsApp contacts and send messages",
+      "mode": "view"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "favoriteNumbers",
+      "title": "Favorite Numbers",
+      "description": "Comma-separated phone numbers with country code (e.g., +1234567890,+0987654321)",
+      "type": "textfield",
+      "required": false,
+      "placeholder": "+1234567890,+0987654321"
+    },
+    {
+      "name": "servicePort",
+      "title": "Service Port",
+      "description": "Port for the local WhatsApp service",
+      "type": "textfield",
+      "required": false,
+      "default": "3847"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.64.0",
+    "@raycast/utils": "^1.10.0",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^1.0.8",
+    "@types/node": "~20.10.0",
+    "@types/react": "^18.2.0",
+    "eslint": "^8.54.0",
+    "prettier": "^3.1.0",
+    "typescript": "^5.3.2"
+  },
+  "overrides": {
+    "@types/react": "^18.2.0"
+  },
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "fix-lint": "ray lint --fix",
+    "lint": "ray lint",
+    "publish": "npx @raycast/api@latest publish"
+  }
+}
