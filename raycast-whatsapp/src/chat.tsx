@@ -116,14 +116,6 @@ export function ChatView({ contact }: ChatViewProps) {
             onAction={loadMessages}
             shortcut={{ modifiers: ["cmd"], key: "r" }}
           />
-          {!contact.isGroup && (
-            <Action.OpenInBrowser
-              title="Video Call"
-              icon={Icon.Video}
-              url={`https://wa.me/${contact.number}?video=1`}
-              shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
-            />
-          )}
         </ActionPanel>
       }
     />

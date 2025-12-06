@@ -107,14 +107,6 @@ export default function Command() {
               icon={Icon.Message}
               target={<ChatView contact={contact} />}
             />
-            {!contact.isGroup && (
-              <Action.OpenInBrowser
-                title="Video Call"
-                icon={Icon.Video}
-                url={`https://wa.me/${contact.number}?video=1`}
-                shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
-              />
-            )}
           </ActionPanel>
         }
       />
