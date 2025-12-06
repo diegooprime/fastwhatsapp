@@ -6,15 +6,22 @@
     <string>com.whatsapp-raycast</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/node</string>
+        <string>/opt/homebrew/bin/node</string>
         <string>dist/index.js</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/p/Desktop/v/whatsappFast/whatsapp-service</string>
+    <string>/Users/p/Desktop/v/my_tools/whatsappFast/whatsapp-service</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
     <key>StandardOutPath</key>
     <string>/tmp/whatsapp-raycast.log</string>
     <key>StandardErrorPath</key>
@@ -22,7 +29,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
 </dict>
 </plist>
