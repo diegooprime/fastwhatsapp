@@ -2,8 +2,11 @@ import { Client, LocalAuth, Message, Contact, Chat } from "whatsapp-web.js";
 import * as QRCode from "qrcode";
 import * as path from "path";
 import * as os from "os";
+import * as fs from "fs";
 
 const SESSION_PATH = path.join(os.homedir(), ".whatsapp-raycast", "session");
+const HEALTH_CHECK_INTERVAL = 60000; // 1 minute
+const RECONNECT_DELAY = 5000; // 5 seconds
 
 export type ConnectionStatus = "disconnected" | "connecting" | "qr" | "authenticated" | "ready";
 
@@ -11,6 +14,8 @@ class WhatsAppClient {
   private client: Client;
   private currentQR: string | null = null;
   private status: ConnectionStatus = "disconnected";
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private isReconnecting: boolean = false;
 
   constructor() {
     this.client = new Client({
@@ -57,25 +62,148 @@ class WhatsAppClient {
       console.log("[WhatsApp] Disconnected:", reason);
       this.status = "disconnected";
       this.currentQR = null;
+      // Trigger automatic reconnection
+      this.reconnect();
     });
 
     this.client.on("change_state", (state) => {
       console.log("[WhatsApp] State changed:", state);
     });
 
-    this.client.on("message", (msg) => {
-      console.log("[WhatsApp] Message received from:", msg.from);
-    });
+    // Message event handler - no logging of sender info for privacy
+    this.client.on("message", () => {});
   }
 
   async initialize(): Promise<void> {
     console.log("[WhatsApp] Initializing client...");
     this.status = "connecting";
-    await this.client.initialize();
+    try {
+      await this.client.initialize();
+      this.startHealthCheck();
+    } catch (error: any) {
+      const errorMsg = error?.message || String(error);
+      console.error("[WhatsApp] Initialization failed:", errorMsg);
+      
+      // Detect session corruption and auto-clear
+      if (errorMsg.includes("Target closed") || 
+          errorMsg.includes("Session") || 
+          errorMsg.includes("Protocol error") ||
+          errorMsg.includes("Navigation") ||
+          errorMsg.includes("disconnected")) {
+        console.log("[WhatsApp] Detected corrupted session, clearing and retrying...");
+        await this.clearSession();
+        // Recreate client and retry once
+        this.client = new Client({
+          authStrategy: new LocalAuth({
+            dataPath: SESSION_PATH,
+          }),
+          puppeteer: {
+            headless: true,
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          },
+        });
+        this.setupEventHandlers();
+        await this.client.initialize();
+        this.startHealthCheck();
+      } else {
+        throw error;
+      }
+    }
   }
 
   getStatus(): ConnectionStatus {
     return this.status;
+  }
+
+  async destroy(): Promise<void> {
+    console.log("[WhatsApp] Destroying client...");
+    this.stopHealthCheck();
+    try {
+      await this.client.destroy();
+      console.log("[WhatsApp] Client destroyed successfully");
+    } catch (error) {
+      console.error("[WhatsApp] Error destroying client:", error);
+    }
+    this.status = "disconnected";
+    this.currentQR = null;
+  }
+
+  async reconnect(): Promise<void> {
+    if (this.isReconnecting) {
+      console.log("[WhatsApp] Already reconnecting, skipping...");
+      return;
+    }
+
+    this.isReconnecting = true;
+    console.log("[WhatsApp] Attempting to reconnect...");
+
+    try {
+      // Destroy existing client
+      await this.destroy();
+
+      // Wait before reconnecting
+      await new Promise((resolve) => setTimeout(resolve, RECONNECT_DELAY));
+
+      // Create new client
+      this.client = new Client({
+        authStrategy: new LocalAuth({
+          dataPath: SESSION_PATH,
+        }),
+        puppeteer: {
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        },
+      });
+      this.setupEventHandlers();
+
+      // Initialize
+      await this.initialize();
+      console.log("[WhatsApp] Reconnection successful");
+    } catch (error) {
+      console.error("[WhatsApp] Reconnection failed:", error);
+      this.status = "disconnected";
+    } finally {
+      this.isReconnecting = false;
+    }
+  }
+
+  private async clearSession(): Promise<void> {
+    console.log("[WhatsApp] Clearing session data...");
+    try {
+      if (fs.existsSync(SESSION_PATH)) {
+        fs.rmSync(SESSION_PATH, { recursive: true, force: true });
+        console.log("[WhatsApp] Session cleared successfully");
+      }
+    } catch (error) {
+      console.error("[WhatsApp] Error clearing session:", error);
+    }
+  }
+
+  private startHealthCheck(): void {
+    this.stopHealthCheck();
+    console.log("[WhatsApp] Starting health check...");
+    this.healthCheckInterval = setInterval(async () => {
+      if (this.status === "ready") {
+        try {
+          // Simple health check - try to get client state
+          const state = await this.client.getState();
+          if (!state) {
+            console.log("[WhatsApp] Health check failed: no state");
+            this.reconnect();
+          }
+        } catch (error) {
+          console.error("[WhatsApp] Health check failed:", error);
+          this.reconnect();
+        }
+      }
+    }, HEALTH_CHECK_INTERVAL);
+  }
+
+  private stopHealthCheck(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
   }
 
   async getQRCode(): Promise<string | null> {

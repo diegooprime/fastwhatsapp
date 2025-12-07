@@ -36,13 +36,27 @@ async function start() {
 
 start();
 
-// Graceful shutdown
-process.on("SIGINT", () => {
-  console.log("[Server] Shutting down...");
-  process.exit(0);
-});
+// Graceful shutdown with proper client cleanup
+async function gracefulShutdown(signal: string) {
+  console.log(`[Server] Received ${signal}, shutting down gracefully...`);
+  
+  // Set a timeout to force exit if cleanup takes too long
+  const forceExitTimeout = setTimeout(() => {
+    console.log("[Server] Forced exit after timeout");
+    process.exit(1);
+  }, 10000); // 10 second timeout
 
-process.on("SIGTERM", () => {
-  console.log("[Server] Shutting down...");
-  process.exit(0);
-});
+  try {
+    await whatsappClient.destroy();
+    clearTimeout(forceExitTimeout);
+    console.log("[Server] Cleanup complete, exiting");
+    process.exit(0);
+  } catch (error) {
+    console.error("[Server] Error during shutdown:", error);
+    clearTimeout(forceExitTimeout);
+    process.exit(1);
+  }
+}
+
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
