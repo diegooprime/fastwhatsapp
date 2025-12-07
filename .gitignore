@@ -11,6 +11,10 @@ dist/
 # OS files
 .DS_Store
 
+# Screenshots
+**/CleanShot_*
+*.png
+
 # IDE
 .idea/
 .vscode/
