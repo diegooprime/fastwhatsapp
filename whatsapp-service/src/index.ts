@@ -57,3 +57,14 @@ async function shutdown() {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+
+// Prevent crashes from unhandled errors
+process.on("uncaughtException", (error) => {
+  console.error("[Server] Uncaught exception:", error.message);
+  // Don't exit - let the WhatsApp client handle reconnection
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[Server] Unhandled rejection:", reason);
+  // Don't exit - let the WhatsApp client handle reconnection
+});

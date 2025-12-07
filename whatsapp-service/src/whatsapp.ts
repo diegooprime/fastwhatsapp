@@ -14,6 +14,9 @@ class WhatsAppClient {
   private status: ConnectionStatus = "disconnected";
   private healthCheckInterval: NodeJS.Timeout | null = null;
   private isDestroying: boolean = false;
+  private reconnectAttempts: number = 0;
+  private maxReconnectAttempts: number = 10;
+  private isReconnecting: boolean = false;
 
   constructor() {
     this.createClient();
@@ -67,6 +70,7 @@ class WhatsAppClient {
     this.client.on("ready", () => {
       console.log("[WhatsApp] Client is ready");
       this.status = "ready";
+      this.reconnectAttempts = 0; // Reset on successful connection
       this.startHealthCheck();
     });
 
@@ -96,7 +100,25 @@ class WhatsAppClient {
     try {
       await this.client.initialize();
     } catch (error: any) {
-      console.error("[WhatsApp] Failed to initialize:", error);
+      console.error("[WhatsApp] Failed to initialize:", error.message);
+      
+      // Handle browser already running (orphan Chrome processes)
+      if (error.message?.includes("browser is already running") || 
+          error.message?.includes("already running for")) {
+        console.log("[WhatsApp] Detected orphan browser. Cleaning up and retrying...");
+        await this.killOrphanBrowsers();
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Recreate client and try again
+        this.createClient();
+        try {
+          await this.client.initialize();
+          return;
+        } catch (retryError: any) {
+          console.error("[WhatsApp] Retry after cleanup failed:", retryError.message);
+        }
+      }
+      
       if (error.message?.includes("Target closed") || error.message?.includes("Session closed")) {
         console.log("[WhatsApp] Detected session corruption. Clearing session and retrying...");
         await this.clearSession();
@@ -105,6 +127,22 @@ class WhatsAppClient {
         this.status = "disconnected";
         throw error;
       }
+    }
+  }
+
+  private async killOrphanBrowsers(): Promise<void> {
+    console.log("[WhatsApp] Killing orphan Chrome processes...");
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+    
+    try {
+      // Kill Chrome for Testing processes that are using our session directory
+      await execAsync('pkill -9 -f "Google Chrome for Testing.*whatsapp-raycast" || true');
+      // Also remove any stale SingletonLock files
+      await execAsync(`rm -f "${SESSION_PATH}/SingletonLock" "${SESSION_PATH}/SingletonCookie" "${SESSION_PATH}/SingletonSocket" 2>/dev/null || true`);
+    } catch (e) {
+      // Ignore errors - best effort cleanup
     }
   }
 
@@ -124,20 +162,48 @@ class WhatsAppClient {
   }
 
   async reconnect(): Promise<void> {
-    if (this.isDestroying) return;
+    if (this.isDestroying || this.isReconnecting) return;
     
-    console.log("[WhatsApp] Reconnecting...");
+    this.isReconnecting = true;
+    this.reconnectAttempts++;
+    
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s max
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 30000);
+    console.log(`[WhatsApp] Reconnecting (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}) in ${delay}ms...`);
+    
     try {
       await this.client.destroy();
     } catch (e) {
       // Ignore destroy errors during reconnect
     }
 
-    // Wait a bit before recreating
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, delay));
     
-    this.createClient();
-    await this.initialize();
+    if (this.isDestroying) {
+      this.isReconnecting = false;
+      return;
+    }
+    
+    try {
+      this.createClient();
+      await this.initialize();
+      // Success - reset attempts
+      this.reconnectAttempts = 0;
+      console.log("[WhatsApp] Reconnected successfully");
+    } catch (error: any) {
+      console.error("[WhatsApp] Reconnect failed:", error.message);
+      
+      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        this.isReconnecting = false;
+        // Try again
+        this.reconnect();
+      } else {
+        console.error("[WhatsApp] Max reconnect attempts reached. Manual restart required.");
+        this.status = "disconnected";
+      }
+    } finally {
+      this.isReconnecting = false;
+    }
   }
 
   async clearSession(): Promise<void> {
@@ -160,23 +226,25 @@ class WhatsAppClient {
       clearInterval(this.healthCheckInterval);
     }
 
-    // Check every 2 minutes
+    // Check every 30 seconds for faster detection of issues
     this.healthCheckInterval = setInterval(async () => {
-      if (this.status === "ready" && !this.isDestroying) {
+      if (this.status === "ready" && !this.isDestroying && !this.isReconnecting) {
         try {
           // Simple check to see if we can get state
           const state = await this.client.getState();
           if (!state) {
             throw new Error("No state returned");
           }
-        } catch (error) {
-          console.error("[WhatsApp] Health check failed:", error);
+          // Reset reconnect attempts on successful health check
+          this.reconnectAttempts = 0;
+        } catch (error: any) {
+          console.error("[WhatsApp] Health check failed:", error.message);
           this.status = "disconnected";
           console.log("[WhatsApp] Triggering reconnect from health check");
           this.reconnect().catch(e => console.error("[WhatsApp] Reconnect failed:", e));
         }
       }
-    }, 2 * 60 * 1000);
+    }, 30 * 1000);
   }
 
   getStatus(): ConnectionStatus {
