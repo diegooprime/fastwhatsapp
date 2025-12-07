@@ -16,6 +16,13 @@
   ],
   "preferences": [
     {
+      "name": "apiKey",
+      "title": "API Key",
+      "description": "API key for authenticating with the WhatsApp service. Find it in ~/.whatsapp-raycast/api-key",
+      "type": "password",
+      "required": true
+    },
+    {
       "name": "favoriteContacts",
       "title": "Favorite Contacts",
       "description": "Comma-separated contact names (case-insensitive partial match)",

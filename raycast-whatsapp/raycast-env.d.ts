@@ -8,6 +8,8 @@
 /* eslint-disable @typescript-eslint/ban-types */
 
 type ExtensionPreferences = {
+  /** API Key - API key for authenticating with the WhatsApp service. Find it in ~/.whatsapp-raycast/api-key */
+  "apiKey": string,
   /** Favorite Contacts - Comma-separated contact names (case-insensitive partial match) */
   "favoriteContacts": string,
   /** Service Port - Port for the local WhatsApp service */

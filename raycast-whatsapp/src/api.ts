@@ -1,4 +1,4 @@
-import { getServiceUrl } from "./preferences";
+import { getServiceUrl, getApiKey } from "./preferences";
 
 export interface Contact {
   id: string;
@@ -44,13 +44,15 @@ class WhatsAppAPI {
   }
 
   private async fetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
-    // Re-fetch base URL in case preferences changed
+    // Re-fetch base URL and API key in case preferences changed
     this.baseUrl = getServiceUrl();
+    const apiKey = getApiKey();
     
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       ...options,
       headers: {
         "Content-Type": "application/json",
+        "X-API-Key": apiKey,
         ...options?.headers,
       },
     });
