@@ -6,7 +6,7 @@ import {
   showToast,
   Toast,
 } from "@raycast/api";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api } from "./api";
 
 interface QRCodeViewProps {
@@ -17,38 +17,112 @@ export function QRCodeView({ onAuthenticated }: QRCodeViewProps) {
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [message, setMessage] = useState("Loading QR code...");
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Use refs to avoid effect re-runs and track state across renders
+  const onAuthenticatedRef = useRef(onAuthenticated);
+  const hasLoadedQR = useRef(false);
+  const isAuthenticating = useRef(false);
+  
+  // Keep ref in sync
+  onAuthenticatedRef.current = onAuthenticated;
 
-  const checkAuth = useCallback(async () => {
-    try {
-      const status = await api.getStatus();
-      if (status.ready) {
-        showToast({
-          style: Toast.Style.Success,
-          title: "Connected!",
-          message: "WhatsApp is now connected",
-        });
-        onAuthenticated();
-        return true;
+  useEffect(() => {
+    let isMounted = true;
+    
+    const checkAuth = async (): Promise<boolean> => {
+      try {
+        const status = await api.getStatus();
+        if (status.ready && isMounted) {
+          showToast({
+            style: Toast.Style.Success,
+            title: "Connected!",
+            message: "WhatsApp is now connected",
+          });
+          onAuthenticatedRef.current();
+          return true;
+        }
+        // Track if we're in the middle of authenticating (status is "authenticated" but not "ready" yet)
+        if (status.status === "authenticated") {
+          isAuthenticating.current = true;
+        }
+      } catch {
+        // Ignore errors
       }
-    } catch {
-      // Ignore errors
-    }
-    return false;
-  }, [onAuthenticated]);
+      return false;
+    };
 
-  const loadQR = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      // First check if already authenticated
-      if (await checkAuth()) {
-        return;
-      }
-
-      const response = await api.getQR();
+    const loadQR = async () => {
+      if (!isMounted) return;
       
+      setIsLoading(true);
+      try {
+        // First check if already authenticated
+        if (await checkAuth()) {
+          return;
+        }
+
+        const response = await api.getQR();
+        
+        if (!isMounted) return;
+        
+        if (response.qr) {
+          setQrCode(response.qr);
+          setMessage("Scan this QR code with WhatsApp on your phone");
+          hasLoadedQR.current = true;
+        } else if (response.message) {
+          setMessage(response.message);
+        }
+      } catch (error: any) {
+        if (!isMounted) return;
+        setMessage("Failed to load QR code. Is the service running?");
+        showToast({
+          style: Toast.Style.Failure,
+          title: "Error",
+          message: error.message,
+        });
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    // Initial load
+    loadQR();
+
+    // Poll for authentication status only - don't reload QR during handshake
+    const interval = setInterval(async () => {
+      if (!isMounted) return;
+      
+      const authenticated = await checkAuth();
+      
+      // Only try to reload QR if:
+      // 1. Not authenticated
+      // 2. Never loaded a QR before
+      // 3. Not in the middle of authenticating (handshake in progress)
+      if (!authenticated && !hasLoadedQR.current && !isAuthenticating.current) {
+        loadQR();
+      }
+    }, 3000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []); // Empty dependency array - runs once on mount
+  
+  const handleRefreshQR = async () => {
+    // Manual refresh - reset tracking and reload
+    hasLoadedQR.current = false;
+    isAuthenticating.current = false;
+    setIsLoading(true);
+    
+    try {
+      const response = await api.getQR();
       if (response.qr) {
         setQrCode(response.qr);
         setMessage("Scan this QR code with WhatsApp on your phone");
+        hasLoadedQR.current = true;
       } else if (response.message) {
         setMessage(response.message);
       }
@@ -62,22 +136,33 @@ export function QRCodeView({ onAuthenticated }: QRCodeViewProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [checkAuth]);
+  };
 
-  useEffect(() => {
-    loadQR();
-
-    // Poll for authentication status
-    const interval = setInterval(async () => {
-      const authenticated = await checkAuth();
-      if (!authenticated && !qrCode) {
-        // Refresh QR if not authenticated and no QR shown
-        loadQR();
+  const handleCheckConnection = async () => {
+    try {
+      const status = await api.getStatus();
+      if (status.ready) {
+        showToast({
+          style: Toast.Style.Success,
+          title: "Connected!",
+          message: "WhatsApp is now connected",
+        });
+        onAuthenticatedRef.current();
+      } else {
+        showToast({
+          style: Toast.Style.Animated,
+          title: "Status: " + status.status,
+          message: status.status === "authenticated" ? "Loading WhatsApp..." : "Not connected yet",
+        });
       }
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [loadQR, checkAuth, qrCode]);
+    } catch {
+      showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: "Could not check status",
+      });
+    }
+  };
 
   const markdown = qrCode
     ? `# Scan QR Code\n\n![QR Code](${qrCode})\n\n${message}`
@@ -92,12 +177,12 @@ export function QRCodeView({ onAuthenticated }: QRCodeViewProps) {
           <Action
             title="Refresh QR Code"
             icon={Icon.ArrowClockwise}
-            onAction={loadQR}
+            onAction={handleRefreshQR}
           />
           <Action
             title="Check Connection"
             icon={Icon.Checkmark}
-            onAction={checkAuth}
+            onAction={handleCheckConnection}
           />
         </ActionPanel>
       }
