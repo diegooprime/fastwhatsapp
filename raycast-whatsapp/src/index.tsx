@@ -51,11 +51,11 @@ export default function Command() {
     try {
       const allContacts = await api.getContacts();
       setContacts(allContacts);
-    } catch (error: any) {
+    } catch (error) {
       showToast({
         style: Toast.Style.Failure,
         title: "Failed to load contacts",
-        message: error.message,
+        message: error instanceof Error ? error.message : "Unknown error",
       });
     } finally {
       setIsLoading(false);
@@ -65,7 +65,7 @@ export default function Command() {
   // Filter and sort contacts - only show favorites unless searching
   const { favorites, others } = useMemo(() => {
     const isSearching = searchText.length > 0;
-    
+
     // Check if contact matches any favorite name
     const isFavorite = (contact: Contact) =>
       favoriteNames.some((fav) => contact.name.toLowerCase().includes(fav));
@@ -76,7 +76,10 @@ export default function Command() {
     contacts.forEach((contact) => {
       if (isFavorite(contact)) {
         // Always include favorites if they match search (or no search)
-        if (!isSearching || contact.name.toLowerCase().includes(searchText.toLowerCase())) {
+        if (
+          !isSearching ||
+          contact.name.toLowerCase().includes(searchText.toLowerCase())
+        ) {
           favs.push(contact);
         }
       } else if (isSearching) {
@@ -119,21 +122,25 @@ export default function Command() {
       <List>
         <List.EmptyView
           icon={Icon.XMarkCircle}
-          title={status === "qr" ? "QR Code Available" : "WhatsApp Not Connected"}
+          title={
+            status === "qr" ? "QR Code Available" : "WhatsApp Not Connected"
+          }
           description={
             status === "qr"
               ? "Press Enter to scan the QR code"
               : status === "connecting"
-              ? "Connecting to WhatsApp..."
-              : "Make sure the WhatsApp service is running and authenticated"
+                ? "Connecting to WhatsApp..."
+                : "Make sure the WhatsApp service is running and authenticated"
           }
           actions={
             <ActionPanel>
               {status === "qr" && (
                 <Action
-                  title="Scan QR Code"
+                  title="Scan Qr Code"
                   icon={Icon.Camera}
-                  onAction={() => push(<QRCodeView onAuthenticated={checkStatus} />)}
+                  onAction={() =>
+                    push(<QRCodeView onAuthenticated={checkStatus} />)
+                  }
                 />
               )}
               <Action

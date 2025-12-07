@@ -24,7 +24,12 @@ export interface Chat {
   lastMessage?: string;
 }
 
-export type ConnectionStatus = "disconnected" | "connecting" | "qr" | "authenticated" | "ready";
+export type ConnectionStatus =
+  | "disconnected"
+  | "connecting"
+  | "qr"
+  | "authenticated"
+  | "ready";
 
 export interface StatusResponse {
   status: ConnectionStatus;
@@ -47,7 +52,7 @@ class WhatsAppAPI {
     // Re-fetch base URL and API key in case preferences changed
     this.baseUrl = getServiceUrl();
     const apiKey = getApiKey();
-    
+
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       ...options,
       headers: {
@@ -58,7 +63,9 @@ class WhatsAppAPI {
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: "Unknown error" })) as { error?: string };
+      const errorData = (await response
+        .json()
+        .catch(() => ({ error: "Unknown error" }))) as { error?: string };
       throw new Error(errorData.error || `HTTP ${response.status}`);
     }
 
@@ -85,12 +92,15 @@ class WhatsAppAPI {
 
   async getMessages(chatId: string, limit: number = 10): Promise<Message[]> {
     const response = await this.fetch<{ messages: Message[] }>(
-      `/chats/${encodeURIComponent(chatId)}/messages?limit=${limit}`
+      `/chats/${encodeURIComponent(chatId)}/messages?limit=${limit}`,
     );
     return response.messages;
   }
 
-  async sendMessage(chatId: string, message: string): Promise<{ success: boolean; messageId?: string }> {
+  async sendMessage(
+    chatId: string,
+    message: string,
+  ): Promise<{ success: boolean; messageId?: string }> {
     return this.fetch<{ success: boolean; messageId?: string }>("/send", {
       method: "POST",
       body: JSON.stringify({ chatId, message }),
@@ -100,7 +110,7 @@ class WhatsAppAPI {
   async sendImage(
     chatId: string,
     base64: string,
-    caption?: string
+    caption?: string,
   ): Promise<{ success: boolean; messageId?: string }> {
     return this.fetch<{ success: boolean; messageId?: string }>("/send-image", {
       method: "POST",

@@ -17,18 +17,18 @@ export function QRCodeView({ onAuthenticated }: QRCodeViewProps) {
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [message, setMessage] = useState("Loading QR code...");
   const [isLoading, setIsLoading] = useState(true);
-  
+
   // Use refs to avoid effect re-runs and track state across renders
   const onAuthenticatedRef = useRef(onAuthenticated);
   const hasLoadedQR = useRef(false);
   const isAuthenticating = useRef(false);
-  
+
   // Keep ref in sync
   onAuthenticatedRef.current = onAuthenticated;
 
   useEffect(() => {
     let isMounted = true;
-    
+
     const checkAuth = async (): Promise<boolean> => {
       try {
         const status = await api.getStatus();
@@ -53,7 +53,7 @@ export function QRCodeView({ onAuthenticated }: QRCodeViewProps) {
 
     const loadQR = async () => {
       if (!isMounted) return;
-      
+
       setIsLoading(true);
       try {
         // First check if already authenticated
@@ -62,9 +62,9 @@ export function QRCodeView({ onAuthenticated }: QRCodeViewProps) {
         }
 
         const response = await api.getQR();
-        
+
         if (!isMounted) return;
-        
+
         if (response.qr) {
           setQrCode(response.qr);
           setMessage("Scan this QR code with WhatsApp on your phone");
@@ -72,13 +72,13 @@ export function QRCodeView({ onAuthenticated }: QRCodeViewProps) {
         } else if (response.message) {
           setMessage(response.message);
         }
-      } catch (error: any) {
+      } catch (error) {
         if (!isMounted) return;
         setMessage("Failed to load QR code. Is the service running?");
         showToast({
           style: Toast.Style.Failure,
           title: "Error",
-          message: error.message,
+          message: error instanceof Error ? error.message : "Unknown error",
         });
       } finally {
         if (isMounted) {
@@ -93,9 +93,9 @@ export function QRCodeView({ onAuthenticated }: QRCodeViewProps) {
     // Poll for authentication status only - don't reload QR during handshake
     const interval = setInterval(async () => {
       if (!isMounted) return;
-      
+
       const authenticated = await checkAuth();
-      
+
       // Only try to reload QR if:
       // 1. Not authenticated
       // 2. Never loaded a QR before
@@ -110,13 +110,13 @@ export function QRCodeView({ onAuthenticated }: QRCodeViewProps) {
       clearInterval(interval);
     };
   }, []); // Empty dependency array - runs once on mount
-  
+
   const handleRefreshQR = async () => {
     // Manual refresh - reset tracking and reload
     hasLoadedQR.current = false;
     isAuthenticating.current = false;
     setIsLoading(true);
-    
+
     try {
       const response = await api.getQR();
       if (response.qr) {
@@ -126,12 +126,12 @@ export function QRCodeView({ onAuthenticated }: QRCodeViewProps) {
       } else if (response.message) {
         setMessage(response.message);
       }
-    } catch (error: any) {
+    } catch (error) {
       setMessage("Failed to load QR code. Is the service running?");
       showToast({
         style: Toast.Style.Failure,
         title: "Error",
-        message: error.message,
+        message: error instanceof Error ? error.message : "Unknown error",
       });
     } finally {
       setIsLoading(false);
@@ -152,7 +152,10 @@ export function QRCodeView({ onAuthenticated }: QRCodeViewProps) {
         showToast({
           style: Toast.Style.Animated,
           title: "Status: " + status.status,
-          message: status.status === "authenticated" ? "Loading WhatsApp..." : "Not connected yet",
+          message:
+            status.status === "authenticated"
+              ? "Loading WhatsApp..."
+              : "Not connected yet",
         });
       }
     } catch {
@@ -175,7 +178,7 @@ export function QRCodeView({ onAuthenticated }: QRCodeViewProps) {
       actions={
         <ActionPanel>
           <Action
-            title="Refresh QR Code"
+            title="Refresh Qr Code"
             icon={Icon.ArrowClockwise}
             onAction={handleRefreshQR}
           />

@@ -13,7 +13,7 @@ export function getPreferences(): Preferences {
 export function getFavoriteContacts(): string[] {
   const { favoriteContacts } = getPreferences();
   if (!favoriteContacts) return [];
-  
+
   return favoriteContacts
     .split(",")
     .map((n) => n.trim().toLowerCase())

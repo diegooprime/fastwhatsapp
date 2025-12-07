@@ -13,7 +13,9 @@ dist/
 
 # Screenshots
 **/CleanShot_*
-*.png
+
+# Extension icons should NOT be ignored
+!raycast-whatsapp/assets/*.png
 
 # IDE
 .idea/

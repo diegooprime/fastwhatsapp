@@ -1,11 +1,17 @@
 {
+  "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "fastwhatsapp",
   "title": "FastWhatsApp",
-  "description": "Send WhatsApp messages quickly with keyboard shortcuts",
-  "icon": "💬",
-  "author": "diego",
+  "description": "Send WhatsApp messages quickly with keyboard shortcuts. Features favorites, image sharing, and chat history.",
+  "icon": "command-icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/diegooprime/fastwhatsapp.git"
+  },
+  "author": "diegooprime",
   "categories": ["Communication"],
   "license": "MIT",
+  "keywords": ["whatsapp", "messaging", "chat", "communication", "send message"],
   "commands": [
     {
       "name": "index",
@@ -28,7 +34,7 @@
       "description": "Comma-separated contact names (case-insensitive partial match)",
       "type": "textfield",
       "required": false,
-      "default": "Danielota,Benjamin,Bucanero,mis guapos,Diego G"
+      "default": ""
     },
     {
       "name": "servicePort",
@@ -40,8 +46,8 @@
     }
   ],
   "dependencies": {
-    "@raycast/api": "^1.64.0",
-    "@raycast/utils": "^1.10.0",
+    "@raycast/api": "^1.103.10",
+    "@raycast/utils": "^1.19.1",
     "node-fetch": "^3.3.2"
   },
   "devDependencies": {
