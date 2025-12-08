@@ -168,8 +168,8 @@ export function QRCodeView({ onAuthenticated }: QRCodeViewProps) {
   };
 
   const markdown = qrCode
-    ? `# Scan QR Code\n\n![QR Code](${qrCode})\n\n${message}`
-    : `# WhatsApp Authentication\n\n${message}`;
+    ? `![](${qrCode})`
+    : isLoading ? "" : "QR code not available";
 
   return (
     <Detail

@@ -15,6 +15,7 @@ export interface Message {
   from: string;
   hasMedia: boolean;
   mediaData?: string;
+  mediaType?: "image" | "video" | "audio" | "sticker" | "document" | "unknown";
 }
 
 export interface Chat {
@@ -128,6 +129,16 @@ class WhatsAppAPI {
     } catch {
       return null;
     }
+  }
+
+  async reactToMessage(
+    messageId: string,
+    emoji: string
+  ): Promise<{ success: boolean }> {
+    return this.fetch<{ success: boolean }>("/react", {
+      method: "POST",
+      body: JSON.stringify({ messageId, emoji }),
+    });
   }
 }
 

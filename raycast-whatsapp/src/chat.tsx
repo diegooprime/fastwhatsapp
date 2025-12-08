@@ -9,8 +9,9 @@ import {
   Form,
   useNavigation,
 } from "@raycast/api";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { api, Contact, Message } from "./api";
+import { MediaPreview } from "./media-preview";
 
 interface ChatViewProps {
   contact: Contact;
@@ -19,12 +20,23 @@ interface ChatViewProps {
 export function ChatView({ contact }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [showImages, setShowImages] = useState(false);
+
+  // Find last 10 messages with previewable media (images and stickers)
+  const previewableMedia = useMemo(() => {
+    return messages
+      .filter(
+        (msg) =>
+          msg.hasMedia &&
+          (msg.mediaType === "image" || msg.mediaType === "sticker") &&
+          msg.mediaData
+      )
+      .slice(0, 10); // Limit to last 10 images
+  }, [messages]);
 
   const loadMessages = useCallback(async () => {
     setIsLoading(true);
     try {
-      const msgs = await api.getMessages(contact.id, 6);
+      const msgs = await api.getMessages(contact.id, 20); // Fetch enough to find images without too much lag
       setMessages(msgs);
     } catch (error) {
       showToast({
@@ -48,17 +60,19 @@ export function ChatView({ contact }: ChatViewProps) {
 
     if (isToday) {
       return date.toLocaleTimeString([], {
-        hour: "2-digit",
+        hour: "numeric",
         minute: "2-digit",
-      });
+        hour12: true,
+      }).toLowerCase();
     }
 
     return date.toLocaleDateString([], {
       month: "short",
       day: "numeric",
-      hour: "2-digit",
+      hour: "numeric",
       minute: "2-digit",
-    });
+      hour12: true,
+    }).toLowerCase();
   }
 
   function generateMarkdown(): string {
@@ -68,27 +82,41 @@ export function ChatView({ contact }: ChatViewProps) {
 
     let md = `# ${contact.name}\n\n`;
 
-    messages.forEach((msg) => {
+    // Reverse to show most recent messages at the top
+    [...messages].reverse().forEach((msg) => {
       const time = formatTime(msg.timestamp);
-      const sender = msg.fromMe ? "You" : contact.name.split(" ")[0];
+      const sender = msg.fromMe ? "Me" : contact.name.split(" ")[0];
 
-      md += `\`${time}\` **${sender}**\n`;
-
-      // Show small inline image if toggle is on, otherwise just icon
+      // Build message content
+      let content = "";
+      
+      // Handle media - just show icon
       if (msg.hasMedia) {
-        if (msg.mediaData && showImages) {
-          md += `<img src="${msg.mediaData}" width="100" />\n`;
-        } else {
-          md += `📷\n`;
+        const mediaType = msg.mediaType || "unknown";
+        switch (mediaType) {
+          case "image":
+          case "sticker":
+            content += "📸";
+            break;
+          case "video":
+            content += "🎥";
+            break;
+          case "audio":
+            content += "🔊";
+            break;
+          default:
+            content += "📎";
+            break;
         }
       }
 
-      // Show text if available
+      // Add text if available
       if (msg.body) {
-        md += `${msg.body}\n`;
+        if (content) content += " ";
+        content += msg.body;
       }
 
-      md += `\n`;
+      md += `\`${time}\` **${sender}** | ${content}\n\n`;
     });
 
     return md;
@@ -106,12 +134,30 @@ export function ChatView({ contact }: ChatViewProps) {
             icon={Icon.Message}
             target={<ComposeInline contact={contact} onSent={loadMessages} />}
           />
-          <Action
-            title={showImages ? "Hide Images" : "Show Images"}
-            icon={Icon.Image}
-            onAction={() => setShowImages(!showImages)}
-            shortcut={{ modifiers: ["cmd"], key: "i" }}
-          />
+          {previewableMedia.length > 0 && (
+            <ActionPanel.Submenu
+              title={`See media (${previewableMedia.length})`}
+              icon={Icon.Eye}
+              shortcut={{ modifiers: ["cmd"], key: "return" }}
+            >
+              {[...previewableMedia].reverse().map((msg) => (
+                <Action.Push
+                  key={msg.id}
+                  title={formatTime(msg.timestamp)}
+                  icon={msg.mediaType === "sticker" ? Icon.Stars : Icon.Image}
+                  target={
+                    <MediaPreview
+                      mediaData={msg.mediaData!}
+                      mediaType={msg.mediaType as "image" | "sticker"}
+                      contactName={contact.name}
+                      timestamp={msg.timestamp}
+                      messageId={msg.id}
+                    />
+                  }
+                />
+              ))}
+            </ActionPanel.Submenu>
+          )}
           <Action
             title="Refresh"
             icon={Icon.ArrowClockwise}

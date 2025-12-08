@@ -327,6 +327,7 @@ class WhatsAppClient {
     from: string;
     hasMedia: boolean;
     mediaData?: string;
+    mediaType?: "image" | "video" | "audio" | "sticker" | "document" | "unknown";
   }>> {
     if (this.status !== "ready") {
       throw new Error("Client not ready");
@@ -339,15 +340,58 @@ class WhatsAppClient {
       const result = await Promise.all(
         messages.map(async (msg) => {
           let mediaData: string | undefined;
+          let mediaType: "image" | "video" | "audio" | "sticker" | "document" | "unknown" | undefined;
           
           if (msg.hasMedia) {
-            try {
-              const media = await msg.downloadMedia();
-              if (media) {
-                mediaData = `data:${media.mimetype};base64,${media.data}`;
+            // Check message type BEFORE downloading to avoid downloading large videos/audio
+            const msgType = (msg as any).type as string;
+            
+            if (msgType === "video") {
+              mediaType = "video";
+              // Skip download for videos - too large
+            } else if (msgType === "audio" || msgType === "ptt") {
+              mediaType = "audio";
+              // Skip download for audio/voice messages
+            } else if (msgType === "document") {
+              mediaType = "document";
+              // Skip download for documents
+            } else if (msgType === "sticker") {
+              mediaType = "sticker";
+              // Download stickers - they're small
+              try {
+                const media = await msg.downloadMedia();
+                if (media) {
+                  mediaData = `data:${media.mimetype};base64,${media.data}`;
+                }
+              } catch {
+                // Failed to download
               }
-            } catch {
-              // Failed to download media
+            } else if (msgType === "image") {
+              mediaType = "image";
+              // Download images
+              try {
+                const media = await msg.downloadMedia();
+                if (media) {
+                  mediaData = `data:${media.mimetype};base64,${media.data}`;
+                }
+              } catch {
+                // Failed to download
+              }
+            } else {
+              // Unknown media type - try to download and detect
+              mediaType = "unknown";
+              try {
+                const media = await msg.downloadMedia();
+                if (media) {
+                  const mime = media.mimetype.toLowerCase();
+                  if (mime.startsWith("image/")) {
+                    mediaType = "image";
+                    mediaData = `data:${media.mimetype};base64,${media.data}`;
+                  }
+                }
+              } catch {
+                // Failed to download
+              }
             }
           }
 
@@ -359,6 +403,7 @@ class WhatsAppClient {
             from: msg.from,
             hasMedia: msg.hasMedia,
             mediaData,
+            mediaType,
           };
         })
       );
@@ -434,6 +479,33 @@ class WhatsAppClient {
       }
 
       return null;
+    });
+  }
+
+  async reactToMessage(messageId: string, emoji: string): Promise<{ success: boolean }> {
+    if (this.status !== "ready") {
+      throw new Error("Client not ready");
+    }
+
+    return this.withReconnect(async () => {
+      // Get the message by ID and react to it
+      // messageId format is: "true_chatId_messageId" or "false_chatId_messageId"
+      const parts = messageId.split("_");
+      if (parts.length < 3) {
+        throw new Error("Invalid message ID format");
+      }
+
+      const chatId = parts.slice(1, -1).join("_");
+      const chat = await this.client.getChatById(chatId);
+      const messages = await chat.fetchMessages({ limit: 50 });
+      
+      const message = messages.find(m => m.id._serialized === messageId);
+      if (!message) {
+        throw new Error("Message not found");
+      }
+
+      await message.react(emoji);
+      return { success: true };
     });
   }
 }

@@ -133,4 +133,22 @@ router.post("/resolve-number", async (req: Request, res: Response) => {
   }
 });
 
+// POST /react - React to a message with an emoji
+router.post("/react", async (req: Request, res: Response) => {
+  try {
+    const { messageId, emoji } = req.body;
+
+    if (!messageId || !emoji) {
+      res.status(400).json({ error: "messageId and emoji are required" });
+      return;
+    }
+
+    const result = await whatsappClient.reactToMessage(messageId, emoji);
+    res.json(result);
+  } catch (error: any) {
+    console.error("[Routes] React error:", error);
+    res.status(500).json({ error: error.message || "Failed to react" });
+  }
+});
+
 export default router;

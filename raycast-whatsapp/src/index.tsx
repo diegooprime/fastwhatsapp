@@ -27,12 +27,17 @@ export default function Command() {
   }, []);
 
   async function checkStatus() {
+    setIsLoading(true);
     try {
       const response = await api.getStatus();
       setStatus(response.status);
 
       if (response.ready) {
         await loadContacts();
+      } else if (response.status === "connecting") {
+        // Auto-retry after 2 seconds if connecting
+        setIsLoading(false);
+        setTimeout(() => checkStatus(), 2000);
       } else {
         setIsLoading(false);
       }
@@ -129,15 +134,19 @@ export default function Command() {
     return (
       <List>
         <List.EmptyView
-          icon={Icon.XMarkCircle}
+          icon={status === "connecting" ? Icon.Clock : Icon.XMarkCircle}
           title={
-            status === "qr" ? "QR Code Available" : "WhatsApp Not Connected"
+            status === "qr" 
+              ? "QR Code Available" 
+              : status === "connecting"
+                ? "Connecting..."
+                : "WhatsApp Not Connected"
           }
           description={
             status === "qr"
               ? "Press Enter to scan the QR code"
               : status === "connecting"
-                ? "Connecting to WhatsApp..."
+                ? "Please wait, reconnecting automatically..."
                 : "Make sure the WhatsApp service is running and authenticated"
           }
           actions={
@@ -154,7 +163,10 @@ export default function Command() {
               <Action
                 title="Refresh Status"
                 icon={Icon.ArrowClockwise}
-                onAction={checkStatus}
+                onAction={() => {
+                  showToast({ style: Toast.Style.Animated, title: "Checking connection..." });
+                  checkStatus();
+                }}
               />
             </ActionPanel>
           }
