@@ -66,21 +66,26 @@ export default function Command() {
   const { favorites, others } = useMemo(() => {
     const isSearching = searchText.length > 0;
 
-    // Check if contact matches any favorite name
-    const isFavorite = (contact: Contact) =>
-      favoriteNames.some((fav) => contact.name.toLowerCase().includes(fav));
+    // Check if contact matches any favorite name, returns the index for ordering
+    const getFavoriteIndex = (contact: Contact): number => {
+      const index = favoriteNames.findIndex((fav) =>
+        contact.name.toLowerCase().includes(fav)
+      );
+      return index;
+    };
 
-    const favs: Contact[] = [];
+    const favs: { contact: Contact; index: number }[] = [];
     const rest: Contact[] = [];
 
     contacts.forEach((contact) => {
-      if (isFavorite(contact)) {
+      const favIndex = getFavoriteIndex(contact);
+      if (favIndex !== -1) {
         // Always include favorites if they match search (or no search)
         if (
           !isSearching ||
           contact.name.toLowerCase().includes(searchText.toLowerCase())
         ) {
-          favs.push(contact);
+          favs.push({ contact, index: favIndex });
         }
       } else if (isSearching) {
         // Only show non-favorites when searching
@@ -93,7 +98,10 @@ export default function Command() {
       }
     });
 
-    return { favorites: favs, others: rest };
+    // Sort favorites by their config order
+    favs.sort((a, b) => a.index - b.index);
+
+    return { favorites: favs.map((f) => f.contact), others: rest };
   }, [contacts, searchText, favoriteNames]);
 
   function ContactItem({ contact }: { contact: Contact }) {
