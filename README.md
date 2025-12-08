@@ -5,8 +5,7 @@ Raycast extension to send WhatsApp messages without leaving the keyboard.
 I built this because switching to WhatsApp breaks my flow. Now it's ⌘+Space away.
 
 ## Demo
-
-[video]
+https://x.com/diegooprime/status/1997915809256185982
 
 ## How it works
 
