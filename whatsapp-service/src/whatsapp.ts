@@ -17,6 +17,8 @@ class WhatsAppClient {
   private reconnectAttempts: number = 0;
   private maxReconnectAttempts: number = 10;
   private isReconnecting: boolean = false;
+  private healthCheckFailures: number = 0;
+  private maxHealthCheckFailures: number = 3;
 
   constructor() {
     this.createClient();
@@ -39,8 +41,7 @@ class WhatsAppClient {
           "--disable-gpu",
         ],
       },
-      // Let whatsapp-web.js fetch the latest WhatsApp Web version automatically
-    });
+    } as any);
 
     this.setupEventHandlers();
   }
@@ -120,8 +121,8 @@ class WhatsAppClient {
       }
       
       if (error.message?.includes("Target closed") || error.message?.includes("Session closed")) {
-        console.log("[WhatsApp] Detected session corruption. Clearing session and retrying...");
-        await this.clearSession();
+        // Don't clear session - just try to reconnect with existing auth
+        console.log("[WhatsApp] Browser closed unexpectedly. Reconnecting (keeping session)...");
         await this.reconnect();
       } else {
         this.status = "disconnected";
@@ -226,6 +227,9 @@ class WhatsAppClient {
       clearInterval(this.healthCheckInterval);
     }
 
+    // Reset health check failures when starting
+    this.healthCheckFailures = 0;
+
     // Check every 30 seconds for faster detection of issues
     this.healthCheckInterval = setInterval(async () => {
       if (this.status === "ready" && !this.isDestroying && !this.isReconnecting) {
@@ -235,13 +239,20 @@ class WhatsAppClient {
           if (!state) {
             throw new Error("No state returned");
           }
-          // Reset reconnect attempts on successful health check
+          // Reset counters on successful health check
           this.reconnectAttempts = 0;
+          this.healthCheckFailures = 0;
         } catch (error: any) {
-          console.error("[WhatsApp] Health check failed:", error.message);
-          this.status = "disconnected";
-          console.log("[WhatsApp] Triggering reconnect from health check");
-          this.reconnect().catch(e => console.error("[WhatsApp] Reconnect failed:", e));
+          this.healthCheckFailures++;
+          console.error(`[WhatsApp] Health check failed (${this.healthCheckFailures}/${this.maxHealthCheckFailures}):`, error.message);
+          
+          // Only reconnect after multiple consecutive failures
+          if (this.healthCheckFailures >= this.maxHealthCheckFailures) {
+            this.status = "disconnected";
+            console.log("[WhatsApp] Too many health check failures, triggering reconnect");
+            this.healthCheckFailures = 0;
+            this.reconnect().catch(e => console.error("[WhatsApp] Reconnect failed:", e));
+          }
         }
       }
     }, 30 * 1000);
@@ -404,6 +415,8 @@ class WhatsAppClient {
             hasMedia: msg.hasMedia,
             mediaData,
             mediaType,
+            // Include raw message for video download
+            _rawId: msg.id._serialized,
           };
         })
       );
@@ -412,13 +425,43 @@ class WhatsAppClient {
     });
   }
 
-  async sendMessage(chatId: string, message: string): Promise<{ success: boolean; messageId?: string }> {
+  async sendMessage(chatId: string, message: string, quotedMessageId?: string): Promise<{ success: boolean; messageId?: string }> {
     if (this.status !== "ready") {
       throw new Error("Client not ready");
     }
 
     return this.withReconnect(async () => {
       const chat = await this.client.getChatById(chatId);
+      
+      if (quotedMessageId) {
+        // Find the message to reply to and use its reply method
+        console.log(`[WhatsApp] Looking for message to reply: ${quotedMessageId}`);
+        const messages = await chat.fetchMessages({ limit: 100 });
+        const quotedMsg = messages.find(m => m.id._serialized === quotedMessageId);
+        
+        if (quotedMsg) {
+          console.log(`[WhatsApp] Found message, replying...`);
+          try {
+            const sentMsg = await quotedMsg.reply(message);
+            return {
+              success: true,
+              messageId: sentMsg.id._serialized,
+            };
+          } catch (replyError: any) {
+            console.error(`[WhatsApp] Reply method failed:`, replyError.message);
+            // Fallback: send as regular message if reply fails
+            const sentMsg = await chat.sendMessage(message);
+            return {
+              success: true,
+              messageId: sentMsg.id._serialized,
+            };
+          }
+        } else {
+          console.log(`[WhatsApp] Message not found in last 100, sending as regular message`);
+        }
+      }
+      
+      // Regular message (no quote)
       const sentMsg = await chat.sendMessage(message);
 
       return {
@@ -479,6 +522,58 @@ class WhatsAppClient {
       }
 
       return null;
+    });
+  }
+
+  async downloadMedia(messageId: string): Promise<{ data: string; mimetype: string; filename?: string } | null> {
+    if (this.status !== "ready") {
+      throw new Error("Client not ready");
+    }
+
+    return this.withReconnect(async () => {
+      console.log("[WhatsApp] downloadMedia called with:", messageId);
+      
+      // messageId format is: "true_chatId_messageId" or "false_chatId_messageId"
+      const parts = messageId.split("_");
+      console.log("[WhatsApp] Message ID parts:", parts.length, "parts");
+      
+      if (parts.length < 3) {
+        throw new Error("Invalid message ID format");
+      }
+
+      const chatId = parts.slice(1, -1).join("_");
+      console.log("[WhatsApp] Extracted chatId:", chatId);
+      
+      const chat = await this.client.getChatById(chatId);
+      const messages = await chat.fetchMessages({ limit: 100 });
+      console.log("[WhatsApp] Fetched", messages.length, "messages from chat");
+      
+      const message = messages.find(m => m.id._serialized === messageId);
+      if (!message) {
+        console.log("[WhatsApp] Message not found in fetched messages");
+        // Log a few message IDs to debug
+        console.log("[WhatsApp] Sample message IDs:", messages.slice(0, 3).map(m => m.id._serialized));
+        return null;
+      }
+      
+      if (!message.hasMedia) {
+        console.log("[WhatsApp] Message found but has no media");
+        return null;
+      }
+
+      console.log("[WhatsApp] Downloading media from message...");
+      const media = await message.downloadMedia();
+      if (!media) {
+        console.log("[WhatsApp] downloadMedia returned null");
+        return null;
+      }
+
+      console.log("[WhatsApp] Media downloaded, mimetype:", media.mimetype, "size:", media.data?.length || 0);
+      return {
+        data: media.data,
+        mimetype: media.mimetype,
+        filename: media.filename || undefined,
+      };
     });
   }
 

@@ -8,10 +8,15 @@ import {
   Clipboard,
   Form,
   useNavigation,
+  Color,
 } from "@raycast/api";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { api, Contact, Message } from "./api";
 import { MediaPreview } from "./media-preview";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import { execSync } from "child_process";
 
 interface ChatViewProps {
   contact: Contact;
@@ -20,23 +25,13 @@ interface ChatViewProps {
 export function ChatView({ contact }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-
-  // Find last 10 messages with previewable media (images and stickers)
-  const previewableMedia = useMemo(() => {
-    return messages
-      .filter(
-        (msg) =>
-          msg.hasMedia &&
-          (msg.mediaType === "image" || msg.mediaType === "sticker") &&
-          msg.mediaData
-      )
-      .slice(0, 10); // Limit to last 10 images
-  }, [messages]);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const { push } = useNavigation();
 
   const loadMessages = useCallback(async () => {
     setIsLoading(true);
     try {
-      const msgs = await api.getMessages(contact.id, 20); // Fetch enough to find images without too much lag
+      const msgs = await api.getMessages(contact.id, 30);
       setMessages(msgs);
     } catch (error) {
       showToast({
@@ -52,6 +47,10 @@ export function ChatView({ contact }: ChatViewProps) {
   useEffect(() => {
     loadMessages();
   }, [loadMessages]);
+
+  // Messages reversed so index 0 = newest (top)
+  const reversedMessages = [...messages].reverse();
+  const currentMessage = reversedMessages[selectedIndex];
 
   function formatTime(timestamp: number): string {
     const date = new Date(timestamp * 1000);
@@ -75,48 +74,97 @@ export function ChatView({ contact }: ChatViewProps) {
     }).toLowerCase();
   }
 
+  function goDown() {
+    if (selectedIndex < reversedMessages.length - 1) {
+      setSelectedIndex(selectedIndex + 1);
+    }
+  }
+
+  function goUp() {
+    if (selectedIndex > 0) {
+      setSelectedIndex(selectedIndex - 1);
+    }
+  }
+
+  async function handleVideoOpen(msg: Message) {
+    const toast = await showToast({
+      style: Toast.Style.Animated,
+      title: "Downloading video...",
+    });
+
+    try {
+      const media = await api.downloadMedia(msg.id);
+
+      let ext = "mp4";
+      if (media.mimetype.includes("webm")) ext = "webm";
+      else if (media.mimetype.includes("mov")) ext = "mov";
+      else if (media.mimetype.includes("avi")) ext = "avi";
+
+      const tmpFile = path.join(os.tmpdir(), `wa-video-${Date.now()}.${ext}`);
+      const buffer = Buffer.from(media.data, "base64");
+      fs.writeFileSync(tmpFile, new Uint8Array(buffer));
+
+      try {
+        execSync(`open -a "IINA" "${tmpFile}"`);
+      } catch {
+        execSync(`open "${tmpFile}"`);
+      }
+
+      toast.style = Toast.Style.Success;
+      toast.title = "Video opened";
+    } catch (error) {
+      toast.style = Toast.Style.Failure;
+      toast.title = "Failed to open video";
+      toast.message = error instanceof Error ? error.message : "Unknown error";
+    }
+  }
+
   function generateMarkdown(): string {
     if (messages.length === 0 && !isLoading) {
       return `# ${contact.name}\n\n*No messages yet*`;
     }
 
-    let md = `# ${contact.name}\n\n`;
+    if (!currentMessage) {
+      return `# ${contact.name}\n\n*Loading...*`;
+    }
 
-    // Reverse to show most recent messages at the top
-    [...messages].reverse().forEach((msg) => {
+    let md = "";
+
+    // Show all messages with current one highlighted
+    reversedMessages.forEach((msg, idx) => {
       const time = formatTime(msg.timestamp);
-      const sender = msg.fromMe ? "Me" : contact.name.split(" ")[0];
+      const sender = msg.fromMe ? "You" : contact.name.split(" ")[0];
+      const isSelected = idx === selectedIndex;
 
-      // Build message content
       let content = "";
-      
-      // Handle media - just show icon
       if (msg.hasMedia) {
-        const mediaType = msg.mediaType || "unknown";
-        switch (mediaType) {
+        switch (msg.mediaType) {
           case "image":
           case "sticker":
-            content += "📸";
+            content = "📸";
             break;
           case "video":
-            content += "🎥";
+            content = "🎥";
             break;
           case "audio":
-            content += "🔊";
+            content = "🔊";
             break;
           default:
-            content += "📎";
+            content = "📎";
             break;
         }
       }
-
-      // Add text if available
       if (msg.body) {
         if (content) content += " ";
         content += msg.body;
       }
+      if (!content) content = "(empty)";
 
-      md += `\`${time}\` **${sender}** | ${content}\n\n`;
+      if (isSelected) {
+        md += `▶ \`${time}\` **${sender}**: ${content}\n\n`;
+      } else {
+        md += `\`${time}\` ${sender}: ${content}\n\n`;
+      }
     });
 
     return md;
@@ -124,49 +172,186 @@ export function ChatView({ contact }: ChatViewProps) {
 
   return (
     <Detail
-      navigationTitle={contact.name}
+      navigationTitle={`${contact.name} (${selectedIndex + 1}/${reversedMessages.length})`}
       isLoading={isLoading}
       markdown={generateMarkdown()}
       actions={
-        <ActionPanel>
-          <Action.Push
-            title="Send Message"
-            icon={Icon.Message}
-            target={<ComposeInline contact={contact} onSent={loadMessages} />}
-          />
-          {previewableMedia.length > 0 && (
-            <ActionPanel.Submenu
-              title={`See media (${previewableMedia.length})`}
-              icon={Icon.Eye}
+        currentMessage ? (
+          <ActionPanel>
+            {/* Default action depends on message type */}
+            {/* For images/stickers: Enter = View Image */}
+            {currentMessage.hasMedia && (currentMessage.mediaType === "image" || currentMessage.mediaType === "sticker") && currentMessage.mediaData && (
+              <Action.Push
+                title="View Image"
+                icon={Icon.Eye}
+                target={
+                  <MediaPreview
+                    mediaData={currentMessage.mediaData}
+                    mediaType={currentMessage.mediaType as "image" | "sticker"}
+                    contactName={contact.name}
+                    timestamp={currentMessage.timestamp}
+                    messageId={currentMessage.id}
+                  />
+                }
+              />
+            )}
+
+            {/* For videos: Enter = Open Video */}
+            {currentMessage.hasMedia && currentMessage.mediaType === "video" && (
+              <Action
+                title="Open Video"
+                icon={Icon.Video}
+                onAction={() => handleVideoOpen(currentMessage)}
+              />
+            )}
+
+            {/* For text/other messages: Enter = Reply */}
+            {!(
+              (currentMessage.hasMedia && (currentMessage.mediaType === "image" || currentMessage.mediaType === "sticker") && currentMessage.mediaData) ||
+              (currentMessage.hasMedia && currentMessage.mediaType === "video")
+            ) && (
+              <Action.Push
+                title="Reply"
+                icon={Icon.Reply}
+                target={
+                  <ReplyToMessage
+                    contact={contact}
+                    quotedMessage={currentMessage}
+                    onSent={loadMessages}
+                  />
+                }
+              />
+            )}
+
+            {/* Cmd+Enter = Send new message */}
+            <Action.Push
+              title="Send New Message"
+              icon={Icon.Message}
               shortcut={{ modifiers: ["cmd"], key: "return" }}
-            >
-              {[...previewableMedia].reverse().map((msg) => (
-                <Action.Push
-                  key={msg.id}
-                  title={formatTime(msg.timestamp)}
-                  icon={msg.mediaType === "sticker" ? Icon.Stars : Icon.Image}
-                  target={
-                    <MediaPreview
-                      mediaData={msg.mediaData!}
-                      mediaType={msg.mediaType as "image" | "sticker"}
-                      contactName={contact.name}
-                      timestamp={msg.timestamp}
-                      messageId={msg.id}
-                    />
-                  }
+              target={<ComposeInline contact={contact} onSent={loadMessages} />}
+            />
+
+            {/* Cmd+R = Reply (always available) */}
+            <Action.Push
+              title="Reply to This"
+              icon={Icon.Reply}
+              shortcut={{ modifiers: ["cmd"], key: "r" }}
+              target={
+                <ReplyToMessage
+                  contact={contact}
+                  quotedMessage={currentMessage}
+                  onSent={loadMessages}
                 />
-              ))}
-            </ActionPanel.Submenu>
-          )}
-          <Action
-            title="Refresh"
-            icon={Icon.ArrowClockwise}
-            onAction={loadMessages}
-            shortcut={{ modifiers: ["cmd"], key: "r" }}
+              }
+            />
+
+            {/* Navigation */}
+            <Action
+              title="Next Message"
+              icon={Icon.ArrowDown}
+              shortcut={{ modifiers: [], key: "j" }}
+              onAction={goDown}
+            />
+            <Action
+              title="Previous Message"
+              icon={Icon.ArrowUp}
+              shortcut={{ modifiers: [], key: "k" }}
+              onAction={goUp}
+            />
+
+            {currentMessage.body && (
+              <Action.CopyToClipboard
+                title="Copy Message"
+                content={currentMessage.body}
+                shortcut={{ modifiers: ["cmd"], key: "c" }}
+              />
+            )}
+
+            <Action
+              title="Refresh"
+              icon={Icon.ArrowClockwise}
+              onAction={loadMessages}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "r" }}
+            />
+          </ActionPanel>
+        ) : undefined
+      }
+    />
+  );
+}
+
+interface ReplyToMessageProps {
+  contact: Contact;
+  quotedMessage: Message;
+  onSent: () => void;
+}
+
+function ReplyToMessage({ contact, quotedMessage, onSent }: ReplyToMessageProps) {
+  const [message, setMessage] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const { pop } = useNavigation();
+
+  const quotedPreview = quotedMessage.body
+    ? quotedMessage.body.length > 50
+      ? quotedMessage.body.slice(0, 50) + "..."
+      : quotedMessage.body
+    : quotedMessage.hasMedia
+      ? `[${quotedMessage.mediaType || "media"}]`
+      : "(empty)";
+
+  async function handleSubmit() {
+    if (!message.trim()) {
+      showToast({
+        style: Toast.Style.Failure,
+        title: "Enter a message",
+      });
+      return;
+    }
+
+    setIsSending(true);
+    try {
+      await api.sendMessage(contact.id, message.trim(), quotedMessage.id);
+      showToast({ style: Toast.Style.Success, title: "Reply sent!" });
+      onSent();
+      pop();
+    } catch (error) {
+      showToast({
+        style: Toast.Style.Failure,
+        title: "Failed to send",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setIsSending(false);
+    }
+  }
+
+  return (
+    <Form
+      navigationTitle={`Reply to ${contact.name}`}
+      isLoading={isSending}
+      actions={
+        <ActionPanel>
+          <Action.SubmitForm
+            title="Send Reply"
+            icon={Icon.Reply}
+            onSubmit={handleSubmit}
           />
         </ActionPanel>
       }
-    />
+    >
+      <Form.Description
+        title="Replying to"
+        text={`${quotedMessage.fromMe ? "You" : contact.name.split(" ")[0]}: ${quotedPreview}`}
+      />
+      <Form.TextArea
+        id="message"
+        title=""
+        placeholder="Type your reply..."
+        value={message}
+        onChange={setMessage}
+        autoFocus
+      />
+    </Form>
   );
 }
 
@@ -188,11 +373,9 @@ function ComposeInline({ contact, onSent }: ComposeInlineProps) {
       const os = await import("os");
       const path = await import("path");
 
-      // Try to get image from system clipboard using pngpaste
       const tmpFile = path.join(os.tmpdir(), `raycast-wa-${Date.now()}.png`);
 
       try {
-        // Try using osascript to save clipboard image to file
         execSync(
           `osascript -e 'try
           set theFile to POSIX file "${tmpFile}"
@@ -210,7 +393,7 @@ function ComposeInline({ contact, onSent }: ComposeInlineProps) {
         if (fs.existsSync(tmpFile) && fs.statSync(tmpFile).size > 0) {
           const buffer = fs.readFileSync(tmpFile);
           const base64 = `data:image/png;base64,${buffer.toString("base64")}`;
-          fs.unlinkSync(tmpFile); // Clean up
+          fs.unlinkSync(tmpFile);
           setImageData(base64);
           showToast({
             style: Toast.Style.Success,
@@ -222,7 +405,6 @@ function ComposeInline({ contact, onSent }: ComposeInlineProps) {
         // osascript failed, try Raycast clipboard
       }
 
-      // Fallback to Raycast clipboard API
       const clipboard = await Clipboard.read();
 
       if (clipboard.file) {
@@ -243,9 +425,7 @@ function ComposeInline({ contact, onSent }: ComposeInlineProps) {
         }
       }
 
-      // Only paste text if NO image was found
       if (clipboard.text) {
-        // Skip if text looks like image metadata
         if (clipboard.text.match(/^Image\s*\(\d+×\d+\)$/i)) {
           showToast({
             style: Toast.Style.Failure,

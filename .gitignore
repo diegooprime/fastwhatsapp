@@ -16,6 +16,7 @@ dist/
 
 # Extension icons should NOT be ignored
 !raycast-whatsapp/assets/*.png
+.cursor
 
 # IDE
 .idea/

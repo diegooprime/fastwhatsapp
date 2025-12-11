@@ -67,7 +67,8 @@ export function MediaPreview({
       const tmpFile = path.join(os.tmpdir(), `wa-preview-${Date.now()}.${ext}`);
 
       // Write the file
-      fs.writeFileSync(tmpFile, Buffer.from(base64Data, "base64"));
+      const buffer = Buffer.from(base64Data, "base64");
+      fs.writeFileSync(tmpFile, new Uint8Array(buffer));
       
       // Use AppleScript to copy image to clipboard (more reliable)
       if (isPng) {
@@ -125,7 +126,8 @@ export function MediaPreview({
       const resizedFile = path.join(os.tmpdir(), `wa-resized-${Date.now()}.${mimeType.split("/")[1] || "png"}`);
 
       // Write original image
-      fs.writeFileSync(tmpFile, Buffer.from(base64Data, "base64"));
+      const origBuffer = Buffer.from(base64Data, "base64");
+      fs.writeFileSync(tmpFile, new Uint8Array(origBuffer));
 
       // Resize using sips (macOS built-in) - max 400px (constrains both width and height)
       // This ensures tall vertical images fit in the view

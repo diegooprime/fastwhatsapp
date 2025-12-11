@@ -101,11 +101,24 @@ class WhatsAppAPI {
   async sendMessage(
     chatId: string,
     message: string,
+    quotedMessageId?: string,
   ): Promise<{ success: boolean; messageId?: string }> {
     return this.fetch<{ success: boolean; messageId?: string }>("/send", {
       method: "POST",
-      body: JSON.stringify({ chatId, message }),
+      body: JSON.stringify({ chatId, message, quotedMessageId }),
     });
+  }
+
+  async downloadMedia(
+    messageId: string,
+  ): Promise<{ data: string; mimetype: string }> {
+    return this.fetch<{ data: string; mimetype: string }>(
+      "/download-media",
+      {
+        method: "POST",
+        body: JSON.stringify({ messageId }),
+      },
+    );
   }
 
   async sendImage(

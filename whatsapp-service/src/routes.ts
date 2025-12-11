@@ -73,17 +73,17 @@ router.get("/chats/:chatId/messages", async (req: Request, res: Response) => {
   }
 });
 
-// POST /send - Send text message
+// POST /send - Send text message (optionally as reply)
 router.post("/send", async (req: Request, res: Response) => {
   try {
-    const { chatId, message } = req.body;
+    const { chatId, message, quotedMessageId } = req.body;
 
     if (!chatId || !message) {
       res.status(400).json({ error: "chatId and message are required" });
       return;
     }
 
-    const result = await whatsappClient.sendMessage(chatId, message);
+    const result = await whatsappClient.sendMessage(chatId, message, quotedMessageId);
     res.json(result);
   } catch (error: any) {
     console.error("[Routes] Send error:", error);
@@ -148,6 +148,32 @@ router.post("/react", async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error("[Routes] React error:", error);
     res.status(500).json({ error: error.message || "Failed to react" });
+  }
+});
+
+// POST /download-media - Download media from a message
+router.post("/download-media", async (req: Request, res: Response) => {
+  try {
+    const { messageId } = req.body;
+    console.log("[Routes] Download media request for:", messageId);
+
+    if (!messageId) {
+      res.status(400).json({ error: "messageId is required" });
+      return;
+    }
+
+    const media = await whatsappClient.downloadMedia(messageId);
+    if (!media) {
+      console.log("[Routes] Media not found for:", messageId);
+      res.status(404).json({ error: "Media not found" });
+      return;
+    }
+
+    console.log("[Routes] Media downloaded successfully, mimetype:", media.mimetype);
+    res.json(media);
+  } catch (error: any) {
+    console.error("[Routes] Download media error:", error.message);
+    res.status(500).json({ error: error.message || "Failed to download media" });
   }
 });
 
