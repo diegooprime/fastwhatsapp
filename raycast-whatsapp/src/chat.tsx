@@ -119,6 +119,51 @@ export function ChatView({ contact }: ChatViewProps) {
     }
   }
 
+  async function handleImageView(msg: Message): Promise<{ mediaData: string; mediaType: "image" | "sticker" } | null> {
+    // If mediaData already exists, use it
+    if (msg.mediaData) {
+      return { mediaData: msg.mediaData, mediaType: msg.mediaType as "image" | "sticker" };
+    }
+
+    // Validate message ID
+    if (!msg.id) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Cannot load image",
+        message: "Message ID is missing",
+      });
+      return null;
+    }
+
+    // Download on demand
+    const toast = await showToast({
+      style: Toast.Style.Animated,
+      title: "Loading image...",
+      message: `ID: ${msg.id.slice(0, 20)}...`,
+    });
+
+    try {
+      console.log("Downloading media for message:", msg.id, "fromMe:", msg.fromMe);
+      const media = await api.downloadMedia(msg.id);
+      if (!media || !media.data) {
+        toast.style = Toast.Style.Failure;
+        toast.title = "Image not available";
+        toast.message = "Media may have expired or been deleted";
+        return null;
+      }
+      toast.style = Toast.Style.Success;
+      toast.title = "Image loaded";
+      return { mediaData: `data:${media.mimetype};base64,${media.data}`, mediaType: msg.mediaType as "image" | "sticker" };
+    } catch (error) {
+      toast.style = Toast.Style.Failure;
+      toast.title = "Failed to load image";
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      toast.message = errorMsg.length > 100 ? errorMsg.slice(0, 100) + "..." : errorMsg;
+      console.error("Image download error for ID:", msg.id, "Error:", error);
+      return null;
+    }
+  }
+
   function generateMarkdown(): string {
     if (messages.length === 0 && !isLoading) {
       return `# ${contact.name}\n\n*No messages yet*`;
@@ -179,20 +224,25 @@ export function ChatView({ contact }: ChatViewProps) {
         currentMessage ? (
           <ActionPanel>
             {/* Default action depends on message type */}
-            {/* For images/stickers: Enter = View Image */}
-            {currentMessage.hasMedia && (currentMessage.mediaType === "image" || currentMessage.mediaType === "sticker") && currentMessage.mediaData && (
-              <Action.Push
+            {/* For images/stickers: Enter = View Image (downloads on demand if needed) */}
+            {currentMessage.hasMedia && (currentMessage.mediaType === "image" || currentMessage.mediaType === "sticker") && (
+              <Action
                 title="View Image"
                 icon={Icon.Eye}
-                target={
-                  <MediaPreview
-                    mediaData={currentMessage.mediaData}
-                    mediaType={currentMessage.mediaType as "image" | "sticker"}
-                    contactName={contact.name}
-                    timestamp={currentMessage.timestamp}
-                    messageId={currentMessage.id}
-                  />
-                }
+                onAction={async () => {
+                  const result = await handleImageView(currentMessage);
+                  if (result) {
+                    push(
+                      <MediaPreview
+                        mediaData={result.mediaData}
+                        mediaType={result.mediaType}
+                        contactName={contact.name}
+                        timestamp={currentMessage.timestamp}
+                        messageId={currentMessage.id}
+                      />
+                    );
+                  }
+                }}
               />
             )}
 
@@ -207,7 +257,7 @@ export function ChatView({ contact }: ChatViewProps) {
 
             {/* For text/other messages: Enter = Reply */}
             {!(
-              (currentMessage.hasMedia && (currentMessage.mediaType === "image" || currentMessage.mediaType === "sticker") && currentMessage.mediaData) ||
+              (currentMessage.hasMedia && (currentMessage.mediaType === "image" || currentMessage.mediaType === "sticker")) ||
               (currentMessage.hasMedia && currentMessage.mediaType === "video")
             ) && (
               <Action.Push

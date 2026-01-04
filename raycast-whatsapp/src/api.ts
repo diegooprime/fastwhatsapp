@@ -64,10 +64,23 @@ class WhatsAppAPI {
     });
 
     if (!response.ok) {
-      const errorData = (await response
-        .json()
-        .catch(() => ({ error: "Unknown error" }))) as { error?: string };
-      throw new Error(errorData.error || `HTTP ${response.status}`);
+      let errorMessage = `HTTP ${response.status}`;
+      try {
+        const text = await response.text();
+        console.error(`API Error ${response.status} from ${endpoint}:`, text);
+        try {
+          const errorData = JSON.parse(text) as { error?: string };
+          errorMessage = errorData.error || errorMessage;
+        } catch {
+          // Not JSON, use text directly if short enough
+          if (text && text.length < 200) {
+            errorMessage = text;
+          }
+        }
+      } catch {
+        // Failed to read response
+      }
+      throw new Error(errorMessage);
     }
 
     return response.json() as Promise<T>;

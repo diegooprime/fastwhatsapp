@@ -551,8 +551,14 @@ class WhatsAppClient {
       const message = messages.find(m => m.id._serialized === messageId);
       if (!message) {
         console.log("[WhatsApp] Message not found in fetched messages");
-        // Log a few message IDs to debug
-        console.log("[WhatsApp] Sample message IDs:", messages.slice(0, 3).map(m => m.id._serialized));
+        console.log("[WhatsApp] Looking for ID:", messageId);
+        // Log message IDs to debug, showing fromMe status
+        console.log("[WhatsApp] Available messages:", messages.slice(0, 10).map(m => ({
+          id: m.id._serialized,
+          fromMe: m.fromMe,
+          hasMedia: m.hasMedia,
+          type: (m as any).type
+        })));
         return null;
       }
       

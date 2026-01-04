@@ -7,7 +7,7 @@ import {
   Toast,
   useNavigation,
 } from "@raycast/api";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { api, Contact, ConnectionStatus } from "./api";
 import { getFavoriteContacts } from "./preferences";
 import { ChatView } from "./chat";
@@ -18,6 +18,7 @@ export default function Command() {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [isLoading, setIsLoading] = useState(true);
   const [searchText, setSearchText] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const { push } = useNavigation();
 
   const favoriteNames = useMemo(() => getFavoriteContacts(), []);
@@ -109,9 +110,29 @@ export default function Command() {
     return { favorites: favs.map((f) => f.contact), others: rest };
   }, [contacts, searchText, favoriteNames]);
 
+  // Flat list of all visible contact IDs for navigation
+  const allVisibleIds = useMemo(() => {
+    return [...favorites.map((c) => c.id), ...others.map((c) => c.id)];
+  }, [favorites, others]);
+
+  const goDown = useCallback(() => {
+    if (allVisibleIds.length === 0) return;
+    const currentIndex = selectedId ? allVisibleIds.indexOf(selectedId) : -1;
+    const nextIndex = currentIndex < allVisibleIds.length - 1 ? currentIndex + 1 : 0;
+    setSelectedId(allVisibleIds[nextIndex]);
+  }, [allVisibleIds, selectedId]);
+
+  const goUp = useCallback(() => {
+    if (allVisibleIds.length === 0) return;
+    const currentIndex = selectedId ? allVisibleIds.indexOf(selectedId) : 0;
+    const prevIndex = currentIndex > 0 ? currentIndex - 1 : allVisibleIds.length - 1;
+    setSelectedId(allVisibleIds[prevIndex]);
+  }, [allVisibleIds, selectedId]);
+
   function ContactItem({ contact }: { contact: Contact }) {
     return (
       <List.Item
+        id={contact.id}
         key={contact.id}
         title={contact.name}
         subtitle={contact.isGroup ? "Group" : undefined}
@@ -122,6 +143,18 @@ export default function Command() {
               title="Open Chat"
               icon={Icon.Message}
               target={<ChatView contact={contact} />}
+            />
+            <Action
+              title="Next Contact"
+              icon={Icon.ArrowDown}
+              shortcut={{ modifiers: [], key: "j" }}
+              onAction={goDown}
+            />
+            <Action
+              title="Previous Contact"
+              icon={Icon.ArrowUp}
+              shortcut={{ modifiers: [], key: "k" }}
+              onAction={goUp}
             />
           </ActionPanel>
         }
@@ -181,6 +214,8 @@ export default function Command() {
       searchText={searchText}
       onSearchTextChange={setSearchText}
       searchBarPlaceholder="Search contacts..."
+      selectedItemId={selectedId ?? undefined}
+      onSelectionChange={setSelectedId}
     >
       {favorites.length > 0 && (
         <List.Section title="Favorites">
