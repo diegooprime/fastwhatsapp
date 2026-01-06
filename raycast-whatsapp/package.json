@@ -37,12 +37,13 @@
       "default": ""
     },
     {
-      "name": "servicePort",
-      "title": "Service Port",
-      "description": "Port for the local WhatsApp service",
+      "name": "serviceUrl",
+      "title": "Service URL",
+      "description": "Full URL (http://host:3847) or just port (3847) for localhost",
       "type": "textfield",
       "required": false,
-      "default": "3847"
+      "default": "3847",
+      "placeholder": "http://nuc.local:3847"
     }
   ],
   "dependencies": {

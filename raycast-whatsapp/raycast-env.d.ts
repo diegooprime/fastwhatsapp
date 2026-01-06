@@ -12,8 +12,8 @@ type ExtensionPreferences = {
   "apiKey": string,
   /** Favorite Contacts - Comma-separated contact names (case-insensitive partial match) */
   "favoriteContacts": string,
-  /** Service Port - Port for the local WhatsApp service */
-  "servicePort": string
+  /** Service URL - Full URL (http://host:3847) or just port (3847) for localhost */
+  "serviceUrl": string
 }
 
 /** Preferences accessible in all the extension's commands */

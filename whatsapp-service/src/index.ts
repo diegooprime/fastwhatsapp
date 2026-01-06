@@ -7,6 +7,7 @@ import routes from "./routes";
 import { whatsappClient } from "./whatsapp";
 
 const PORT = process.env.PORT || 3847;
+const HOST = process.env.HOST || "127.0.0.1"; // Use 0.0.0.0 for network access
 const app = express();
 
 // API Key management
@@ -67,9 +68,9 @@ app.get("/health", (req, res) => {
 // Start server and initialize WhatsApp
 async function start() {
   try {
-    // Start Express server - bind to localhost only for security
-    app.listen(PORT as number, "127.0.0.1", () => {
-      console.log(`[Server] WhatsApp service running on http://127.0.0.1:${PORT}`);
+    // Start Express server
+    app.listen(PORT as number, HOST, () => {
+      console.log(`[Server] WhatsApp service running on http://${HOST}:${PORT}`);
     });
 
     // Initialize WhatsApp client
