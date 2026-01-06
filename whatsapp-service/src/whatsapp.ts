@@ -336,6 +336,7 @@ class WhatsAppClient {
     fromMe: boolean;
     timestamp: number;
     from: string;
+    senderName?: string;
     hasMedia: boolean;
     mediaData?: string;
     mediaType?: "image" | "video" | "audio" | "sticker" | "document" | "unknown";
@@ -347,9 +348,33 @@ class WhatsAppClient {
     return this.withReconnect(async () => {
       const chat = await this.client.getChatById(chatId);
       const messages = await chat.fetchMessages({ limit });
+      const isGroup = chat.isGroup;
+
+      // Cache for sender names to avoid redundant lookups
+      const senderNameCache = new Map<string, string>();
 
       const result = await Promise.all(
         messages.map(async (msg) => {
+          // Resolve sender name for group messages
+          let senderName: string | undefined;
+          const authorId = (msg as any).author as string | undefined; // In groups, author contains the sender's ID
+          if (isGroup && !msg.fromMe && authorId) {
+            if (senderNameCache.has(authorId)) {
+              senderName = senderNameCache.get(authorId);
+            } else {
+              try {
+                const contact = await this.client.getContactById(authorId);
+                const name = contact.name || contact.pushname || contact.number || authorId.split("@")[0];
+                senderName = name;
+                senderNameCache.set(authorId, name);
+              } catch {
+                // Fallback to phone number
+                const name = authorId.split("@")[0];
+                senderName = name;
+                senderNameCache.set(authorId, name);
+              }
+            }
+          }
           let mediaData: string | undefined;
           let mediaType: "image" | "video" | "audio" | "sticker" | "document" | "unknown" | undefined;
           
@@ -412,11 +437,10 @@ class WhatsAppClient {
             fromMe: msg.fromMe,
             timestamp: msg.timestamp,
             from: msg.from,
+            senderName,
             hasMedia: msg.hasMedia,
             mediaData,
             mediaType,
-            // Include raw message for video download
-            _rawId: msg.id._serialized,
           };
         })
       );

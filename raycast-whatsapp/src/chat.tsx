@@ -178,7 +178,7 @@ export function ChatView({ contact }: ChatViewProps) {
     // Show all messages with current one highlighted
     reversedMessages.forEach((msg, idx) => {
       const time = formatTime(msg.timestamp);
-      const sender = msg.fromMe ? "You" : contact.name.split(" ")[0];
+      const sender = msg.fromMe ? "You" : (msg.senderName || contact.name).split(" ")[0];
       const isSelected = idx === selectedIndex;
 
       let content = "";
@@ -391,7 +391,7 @@ function ReplyToMessage({ contact, quotedMessage, onSent }: ReplyToMessageProps)
     >
       <Form.Description
         title="Replying to"
-        text={`${quotedMessage.fromMe ? "You" : contact.name.split(" ")[0]}: ${quotedPreview}`}
+        text={`${quotedMessage.fromMe ? "You" : (quotedMessage.senderName || contact.name).split(" ")[0]}: ${quotedPreview}`}
       />
       <Form.TextArea
         id="message"

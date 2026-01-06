@@ -13,6 +13,7 @@ export interface Message {
   fromMe: boolean;
   timestamp: number;
   from: string;
+  senderName?: string;
   hasMedia: boolean;
   mediaData?: string;
   mediaType?: "image" | "video" | "audio" | "sticker" | "document" | "unknown";
