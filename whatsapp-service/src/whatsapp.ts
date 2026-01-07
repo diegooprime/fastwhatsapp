@@ -404,15 +404,8 @@ class WhatsAppClient {
               }
             } else if (msgType === "image") {
               mediaType = "image";
-              // Download images
-              try {
-                const media = await msg.downloadMedia();
-                if (media) {
-                  mediaData = `data:${media.mimetype};base64,${media.data}`;
-                }
-              } catch {
-                // Failed to download
-              }
+              // Don't download images eagerly - they'll be loaded on demand
+              // This saves 1-2 seconds per chat load
             } else {
               // Unknown media type - try to download and detect
               mediaType = "unknown";

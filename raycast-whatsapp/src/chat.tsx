@@ -25,22 +25,54 @@ interface ChatViewProps {
 export function ChatView({ contact }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const { push } = useNavigation();
 
-  const loadMessages = useCallback(async () => {
-    setIsLoading(true);
+  // Load cached messages first (instant), then refresh in background
+  const loadMessages = useCallback(async (forceRefresh = false) => {
     try {
-      const msgs = await api.getMessages(contact.id, 30);
-      setMessages(msgs);
+      if (forceRefresh) {
+        // User manually requested refresh
+        setIsRefreshing(true);
+        const response = await api.getMessagesRefresh(contact.id, 30);
+        setMessages(response.messages);
+        setIsRefreshing(false);
+        return;
+      }
+
+      // First: try to get cached messages (instant)
+      const cached = await api.getMessagesCached(contact.id, 30);
+
+      if (cached.messages.length > 0) {
+        // Show cached messages immediately
+        setMessages(cached.messages);
+        setIsLoading(false);
+
+        // Then refresh in background
+        setIsRefreshing(true);
+        try {
+          const fresh = await api.getMessagesRefresh(contact.id, 30);
+          setMessages(fresh.messages);
+        } catch {
+          // Background refresh failed - cached data is still shown
+        }
+        setIsRefreshing(false);
+      } else {
+        // No cache - must fetch fresh (first time opening this chat)
+        setIsLoading(true);
+        const fresh = await api.getMessagesRefresh(contact.id, 30);
+        setMessages(fresh.messages);
+        setIsLoading(false);
+      }
     } catch (error) {
       showToast({
         style: Toast.Style.Failure,
         title: "Failed to load",
         message: error instanceof Error ? error.message : "Unknown error",
       });
-    } finally {
       setIsLoading(false);
+      setIsRefreshing(false);
     }
   }, [contact.id]);
 
@@ -215,9 +247,13 @@ export function ChatView({ contact }: ChatViewProps) {
     return md;
   }
 
+  const navTitle = isRefreshing
+    ? `${contact.name} ↻`
+    : `${contact.name} (${selectedIndex + 1}/${reversedMessages.length})`;
+
   return (
     <Detail
-      navigationTitle={`${contact.name} (${selectedIndex + 1}/${reversedMessages.length})`}
+      navigationTitle={navTitle}
       isLoading={isLoading}
       markdown={generateMarkdown()}
       actions={
@@ -320,7 +356,7 @@ export function ChatView({ contact }: ChatViewProps) {
             <Action
               title="Refresh"
               icon={Icon.ArrowClockwise}
-              onAction={loadMessages}
+              onAction={() => loadMessages(true)}
               shortcut={{ modifiers: ["cmd", "shift"], key: "r" }}
             />
           </ActionPanel>

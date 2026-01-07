@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { whatsappClient } from "./whatsapp";
+import { messageCache, CachedMessage } from "./cache";
 
 const router = Router();
 
@@ -60,13 +61,70 @@ router.get("/chats", async (req: Request, res: Response) => {
 });
 
 // GET /chats/:chatId/messages - Get recent messages from a chat
+// Query params:
+//   - limit: number of messages (default 10)
+//   - cached: if "true", return cached messages only (instant)
+//   - refresh: if "true", force fresh fetch even if cached
 router.get("/chats/:chatId/messages", async (req: Request, res: Response) => {
   try {
     const { chatId } = req.params;
     const limit = parseInt(req.query.limit as string) || 10;
+    const cachedOnly = req.query.cached === "true";
+    const forceRefresh = req.query.refresh === "true";
 
+    // If cached-only requested, return from cache immediately
+    if (cachedOnly) {
+      const cached = await messageCache.get(chatId);
+      if (cached) {
+        return res.json({ messages: cached, fromCache: true });
+      }
+      // No cache available - return empty (frontend will trigger refresh)
+      return res.json({ messages: [], fromCache: true, empty: true });
+    }
+
+    // Check cache first (unless force refresh)
+    if (!forceRefresh) {
+      const cached = await messageCache.get(chatId);
+      if (cached && cached.length > 0) {
+        // Return cached data and trigger background update
+        res.json({ messages: cached, fromCache: true });
+        // Update cache in background (don't await)
+        whatsappClient.getMessages(chatId, limit).then((fresh) => {
+          const toCache: CachedMessage[] = fresh.map((m) => ({
+            id: m.id,
+            body: m.body,
+            fromMe: m.fromMe,
+            timestamp: m.timestamp,
+            from: m.from,
+            senderName: m.senderName,
+            hasMedia: m.hasMedia,
+            mediaType: m.mediaType,
+          }));
+          messageCache.set(chatId, toCache);
+        }).catch((err) => {
+          console.error("[Routes] Background refresh failed:", err.message);
+        });
+        return;
+      }
+    }
+
+    // No cache or force refresh - fetch fresh
     const messages = await whatsappClient.getMessages(chatId, limit);
-    res.json({ messages });
+
+    // Cache the messages (without media data)
+    const toCache: CachedMessage[] = messages.map((m) => ({
+      id: m.id,
+      body: m.body,
+      fromMe: m.fromMe,
+      timestamp: m.timestamp,
+      from: m.from,
+      senderName: m.senderName,
+      hasMedia: m.hasMedia,
+      mediaType: m.mediaType,
+    }));
+    messageCache.set(chatId, toCache);
+
+    res.json({ messages, fromCache: false });
   } catch (error: any) {
     console.error("[Routes] Messages error:", error);
     res.status(500).json({ error: error.message || "Failed to get messages" });

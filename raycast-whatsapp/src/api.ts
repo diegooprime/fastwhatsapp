@@ -19,6 +19,12 @@ export interface Message {
   mediaType?: "image" | "video" | "audio" | "sticker" | "document" | "unknown";
 }
 
+export interface MessagesResponse {
+  messages: Message[];
+  fromCache: boolean;
+  empty?: boolean;
+}
+
 export interface Chat {
   id: string;
   name: string;
@@ -106,10 +112,24 @@ class WhatsAppAPI {
   }
 
   async getMessages(chatId: string, limit: number = 10): Promise<Message[]> {
-    const response = await this.fetch<{ messages: Message[] }>(
+    const response = await this.fetch<MessagesResponse>(
       `/chats/${encodeURIComponent(chatId)}/messages?limit=${limit}`,
     );
     return response.messages;
+  }
+
+  // Get cached messages only (instant, may be stale or empty)
+  async getMessagesCached(chatId: string, limit: number = 10): Promise<MessagesResponse> {
+    return this.fetch<MessagesResponse>(
+      `/chats/${encodeURIComponent(chatId)}/messages?limit=${limit}&cached=true`,
+    );
+  }
+
+  // Force fresh fetch (slow, but up-to-date)
+  async getMessagesRefresh(chatId: string, limit: number = 10): Promise<MessagesResponse> {
+    return this.fetch<MessagesResponse>(
+      `/chats/${encodeURIComponent(chatId)}/messages?limit=${limit}&refresh=true`,
+    );
   }
 
   async sendMessage(
