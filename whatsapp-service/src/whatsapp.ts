@@ -561,12 +561,12 @@ class WhatsAppClient {
         throw new Error("Invalid message ID format");
       }
 
-      const chatId = parts.find(p => p.endsWith("@g.us") || p.endsWith("@c.us"));
+      const chatId = parts.find(p => p.endsWith("@g.us") || p.endsWith("@c.us") || p.endsWith("@lid"));
       if (!chatId) {
         throw new Error("Could not extract chatId from message ID");
       }
       console.log("[WhatsApp] Extracted chatId:", chatId);
-      
+
       const chat = await this.client.getChatById(chatId);
       const messages = await chat.fetchMessages({ limit: 100 });
       console.log("[WhatsApp] Fetched", messages.length, "messages from chat");
@@ -619,7 +619,7 @@ class WhatsAppClient {
         throw new Error("Invalid message ID format");
       }
 
-      const chatId = parts.find(p => p.endsWith("@g.us") || p.endsWith("@c.us"));
+      const chatId = parts.find(p => p.endsWith("@g.us") || p.endsWith("@c.us") || p.endsWith("@lid"));
       if (!chatId) {
         throw new Error("Could not extract chatId from message ID");
       }
