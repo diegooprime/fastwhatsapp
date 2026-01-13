@@ -550,15 +550,21 @@ class WhatsAppClient {
     return this.withReconnect(async () => {
       console.log("[WhatsApp] downloadMedia called with:", messageId);
       
-      // messageId format is: "true_chatId_messageId" or "false_chatId_messageId"
+      // messageId format varies:
+      // - Regular: "true_12345@c.us_MSGID"
+      // - Group with LID: "true_12345@g.us_EXTRA_12345@lid"
+      // Find the part ending with @g.us or @c.us to get the actual chatId
       const parts = messageId.split("_");
       console.log("[WhatsApp] Message ID parts:", parts.length, "parts");
-      
+
       if (parts.length < 3) {
         throw new Error("Invalid message ID format");
       }
 
-      const chatId = parts.slice(1, -1).join("_");
+      const chatId = parts.find(p => p.endsWith("@g.us") || p.endsWith("@c.us"));
+      if (!chatId) {
+        throw new Error("Could not extract chatId from message ID");
+      }
       console.log("[WhatsApp] Extracted chatId:", chatId);
       
       const chat = await this.client.getChatById(chatId);
@@ -607,13 +613,16 @@ class WhatsAppClient {
 
     return this.withReconnect(async () => {
       // Get the message by ID and react to it
-      // messageId format is: "true_chatId_messageId" or "false_chatId_messageId"
+      // Find the part ending with @g.us or @c.us to get the actual chatId
       const parts = messageId.split("_");
       if (parts.length < 3) {
         throw new Error("Invalid message ID format");
       }
 
-      const chatId = parts.slice(1, -1).join("_");
+      const chatId = parts.find(p => p.endsWith("@g.us") || p.endsWith("@c.us"));
+      if (!chatId) {
+        throw new Error("Could not extract chatId from message ID");
+      }
       const chat = await this.client.getChatById(chatId);
       const messages = await chat.fetchMessages({ limit: 50 });
       
