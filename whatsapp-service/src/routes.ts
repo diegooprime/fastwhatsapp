@@ -60,6 +60,18 @@ router.get("/chats", async (req: Request, res: Response) => {
   }
 });
 
+// POST /mark-read/:chatId - Mark a chat as read
+router.post("/mark-read/:chatId", async (req: Request, res: Response) => {
+  try {
+    const { chatId } = req.params;
+    await whatsappClient.markChatAsRead(chatId);
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error("[Routes] Mark read error:", error);
+    res.status(500).json({ error: error.message || "Failed to mark as read" });
+  }
+});
+
 // GET /chats/:chatId/messages - Get recent messages from a chat
 // Query params:
 //   - limit: number of messages (default 10)

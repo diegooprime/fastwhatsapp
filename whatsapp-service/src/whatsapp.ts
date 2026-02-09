@@ -313,20 +313,33 @@ class WhatsAppClient {
     });
   }
 
-  async getChats(): Promise<Array<{ id: string; name: string; unreadCount: number; lastMessage?: string }>> {
+  async getChats(): Promise<Array<{ id: string; name: string; unreadCount: number; lastMessage?: string; lastMessageTimestamp?: number; isGroup: boolean }>> {
     if (this.status !== "ready") {
       throw new Error("Client not ready");
     }
 
     return this.withReconnect(async () => {
       const chats = await this.client.getChats();
-      
+
       return chats.map((chat) => ({
         id: chat.id._serialized,
         name: chat.name,
         unreadCount: chat.unreadCount,
         lastMessage: chat.lastMessage?.body,
+        lastMessageTimestamp: chat.lastMessage?.timestamp,
+        isGroup: chat.isGroup,
       }));
+    });
+  }
+
+  async markChatAsRead(chatId: string): Promise<void> {
+    if (this.status !== "ready") {
+      throw new Error("Client not ready");
+    }
+
+    return this.withReconnect(async () => {
+      const chat = await this.client.getChatById(chatId);
+      await chat.sendSeen();
     });
   }
 

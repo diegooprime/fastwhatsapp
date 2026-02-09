@@ -18,6 +18,12 @@
       "title": "WhatsApp",
       "description": "Open WhatsApp contacts and send messages",
       "mode": "view"
+    },
+    {
+      "name": "inbox",
+      "title": "WhatsApp Inbox",
+      "description": "View unread WhatsApp messages",
+      "mode": "view"
     }
   ],
   "preferences": [

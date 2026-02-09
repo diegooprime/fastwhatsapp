@@ -30,6 +30,8 @@ export interface Chat {
   name: string;
   unreadCount: number;
   lastMessage?: string;
+  lastMessageTimestamp?: number;
+  isGroup: boolean;
 }
 
 export type ConnectionStatus =
@@ -109,6 +111,12 @@ class WhatsAppAPI {
   async getChats(): Promise<Chat[]> {
     const response = await this.fetch<{ chats: Chat[] }>("/chats");
     return response.chats;
+  }
+
+  async markRead(chatId: string): Promise<void> {
+    await this.fetch<{ success: boolean }>(`/mark-read/${encodeURIComponent(chatId)}`, {
+      method: "POST",
+    });
   }
 
   async getMessages(chatId: string, limit: number = 10): Promise<Message[]> {
