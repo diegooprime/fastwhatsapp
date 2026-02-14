@@ -21,13 +21,7 @@ export function getFavoriteContacts(): string[] {
 }
 
 export function getServiceUrl(): string {
-  const { serviceUrl } = getPreferences();
-  // Support full URL (http://host:3847) or just port (3847)
-  if (serviceUrl?.includes("://")) {
-    return serviceUrl.replace(/\/$/, ""); // Remove trailing slash if present
-  }
-  const port = serviceUrl || "3847";
-  return `http://localhost:${port}`;
+  return "http://nuc:3847";
 }
 
 export function getApiKey(): string {
