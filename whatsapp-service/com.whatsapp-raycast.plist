@@ -10,8 +10,7 @@
         <string>dist/index.js</string>
     </array>
     <key>WorkingDirectory</key>
-    <!-- UPDATE THIS PATH to your whatsapp-service directory -->
-    <string>/path/to/whatsapp-service</string>
+    <string>/Users/p/Desktop/v/tools/whatsappFast/whatsapp-service</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -26,9 +25,8 @@
     <dict>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-        <!-- UPDATE THIS to your home directory -->
         <key>HOME</key>
-        <string>/Users/YOUR_USERNAME</string>
+        <string>/Users/p</string>
     </dict>
 </dict>
 </plist>

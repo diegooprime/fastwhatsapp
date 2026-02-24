@@ -13,7 +13,7 @@
     "express": "^4.22.1",
     "puppeteer": "^24.32.0",
     "qrcode": "^1.5.4",
-    "whatsapp-web.js": "^1.34.2"
+    "whatsapp-web.js": "^1.34.6"
   },
   "overrides": {
     "whatsapp-web.js": {

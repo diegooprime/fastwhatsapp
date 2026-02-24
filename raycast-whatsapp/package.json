@@ -48,8 +48,8 @@
       "description": "Full URL (http://host:3847) or just port (3847) for localhost",
       "type": "textfield",
       "required": false,
-      "default": "http://nuc:3847",
-      "placeholder": "http://nuc:3847"
+      "default": "http://127.0.0.1:3847",
+      "placeholder": "http://127.0.0.1:3847"
     }
   ],
   "dependencies": {

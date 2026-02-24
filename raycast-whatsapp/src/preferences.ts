@@ -21,7 +21,7 @@ export function getFavoriteContacts(): string[] {
 }
 
 export function getServiceUrl(): string {
-  return "http://nuc:3847";
+  return "http://127.0.0.1:3847";
 }
 
 export function getApiKey(): string {
