@@ -153,6 +153,13 @@ router.post("/send", async (req: Request, res: Response) => {
       return;
     }
 
+    // TODO [HIGH][SECURITY]: Add rate limiting to prevent message spam and WhatsApp account bans.
+    const MAX_MESSAGE_LEN = 65536; // 64KB
+    if (message.length > MAX_MESSAGE_LEN) {
+      res.status(400).json({ error: "message too long (max 64KB)" });
+      return;
+    }
+
     const result = await whatsappClient.sendMessage(chatId, message, quotedMessageId);
     res.json(result);
   } catch (error: any) {
