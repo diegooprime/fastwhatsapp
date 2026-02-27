@@ -51,6 +51,19 @@ export interface QRResponse {
   message?: string;
 }
 
+export interface SearchResult {
+  id: string;
+  body: string;
+  fromMe: boolean;
+  timestamp: number;
+  from: string;
+  senderName?: string;
+  hasMedia: boolean;
+  mediaType?: string;
+  chatName: string;
+  chatJid: string;
+}
+
 class WhatsAppAPI {
   private baseUrl: string;
 
@@ -114,9 +127,12 @@ class WhatsAppAPI {
   }
 
   async markRead(chatId: string): Promise<void> {
-    await this.fetch<{ success: boolean }>(`/mark-read/${encodeURIComponent(chatId)}`, {
-      method: "POST",
-    });
+    await this.fetch<{ success: boolean }>(
+      `/mark-read/${encodeURIComponent(chatId)}`,
+      {
+        method: "POST",
+      },
+    );
   }
 
   async getMessages(chatId: string, limit: number = 10): Promise<Message[]> {
@@ -127,14 +143,21 @@ class WhatsAppAPI {
   }
 
   // Get cached messages only (instant, may be stale or empty)
-  async getMessagesCached(chatId: string, limit: number = 10): Promise<MessagesResponse> {
-    return this.fetch<MessagesResponse>(
-      `/chats/${encodeURIComponent(chatId)}/messages?limit=${limit}&cached=true`,
-    );
+  async getMessagesCached(
+    chatId: string,
+    limit: number = 10,
+    before?: number,
+  ): Promise<MessagesResponse> {
+    let url = `/chats/${encodeURIComponent(chatId)}/messages?limit=${limit}&cached=true`;
+    if (before) url += `&before=${before}`;
+    return this.fetch<MessagesResponse>(url);
   }
 
   // Force fresh fetch (slow, but up-to-date)
-  async getMessagesRefresh(chatId: string, limit: number = 10): Promise<MessagesResponse> {
+  async getMessagesRefresh(
+    chatId: string,
+    limit: number = 10,
+  ): Promise<MessagesResponse> {
     return this.fetch<MessagesResponse>(
       `/chats/${encodeURIComponent(chatId)}/messages?limit=${limit}&refresh=true`,
     );
@@ -154,13 +177,10 @@ class WhatsAppAPI {
   async downloadMedia(
     messageId: string,
   ): Promise<{ data: string; mimetype: string }> {
-    return this.fetch<{ data: string; mimetype: string }>(
-      "/download-media",
-      {
-        method: "POST",
-        body: JSON.stringify({ messageId }),
-      },
-    );
+    return this.fetch<{ data: string; mimetype: string }>("/download-media", {
+      method: "POST",
+      body: JSON.stringify({ messageId }),
+    });
   }
 
   async sendImage(
@@ -186,9 +206,20 @@ class WhatsAppAPI {
     }
   }
 
+  async searchMessages(
+    query: string,
+    limit: number = 50,
+  ): Promise<SearchResult[]> {
+    const response = await this.fetch<{
+      results: SearchResult[];
+      count: number;
+    }>(`/search?q=${encodeURIComponent(query)}&limit=${limit}`);
+    return response.results;
+  }
+
   async reactToMessage(
     messageId: string,
-    emoji: string
+    emoji: string,
   ): Promise<{ success: boolean }> {
     return this.fetch<{ success: boolean }>("/react", {
       method: "POST",

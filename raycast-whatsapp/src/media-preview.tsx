@@ -42,11 +42,11 @@ export function MediaPreview({
     const today = new Date();
     const isToday = date.toDateString() === today.toDateString();
     if (isToday) return "Today";
-    
+
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
     if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
-    
+
     return date.toLocaleDateString([], {
       weekday: "short",
       month: "short",
@@ -69,12 +69,16 @@ export function MediaPreview({
       // Write the file
       const buffer = Buffer.from(base64Data, "base64");
       fs.writeFileSync(tmpFile, new Uint8Array(buffer));
-      
+
       // Use AppleScript to copy image to clipboard (more reliable)
       if (isPng) {
-        execSync(`osascript -e 'set the clipboard to (read (POSIX file "${tmpFile}") as «class PNGf»)'`);
+        execSync(
+          `osascript -e 'set the clipboard to (read (POSIX file "${tmpFile}") as «class PNGf»)'`,
+        );
       } else {
-        execSync(`osascript -e 'set the clipboard to (read (POSIX file "${tmpFile}") as JPEG picture)'`);
+        execSync(
+          `osascript -e 'set the clipboard to (read (POSIX file "${tmpFile}") as JPEG picture)'`,
+        );
       }
 
       // Cleanup after delay to ensure clipboard has the data
@@ -122,8 +126,14 @@ export function MediaPreview({
       if (!match) return mediaData;
 
       const [, mimeType, base64Data] = match;
-      const tmpFile = path.join(os.tmpdir(), `wa-orig-${Date.now()}.${mimeType.split("/")[1] || "png"}`);
-      const resizedFile = path.join(os.tmpdir(), `wa-resized-${Date.now()}.${mimeType.split("/")[1] || "png"}`);
+      const tmpFile = path.join(
+        os.tmpdir(),
+        `wa-orig-${Date.now()}.${mimeType.split("/")[1] || "png"}`,
+      );
+      const resizedFile = path.join(
+        os.tmpdir(),
+        `wa-resized-${Date.now()}.${mimeType.split("/")[1] || "png"}`,
+      );
 
       // Write original image
       const origBuffer = Buffer.from(base64Data, "base64");
@@ -132,19 +142,23 @@ export function MediaPreview({
       // Resize using sips (macOS built-in) - max 400px (constrains both width and height)
       // This ensures tall vertical images fit in the view
       try {
-        execSync(`sips -Z 400 "${tmpFile}" --out "${resizedFile}"`, { stdio: "ignore" });
-        
+        execSync(`sips -Z 400 "${tmpFile}" --out "${resizedFile}"`, {
+          stdio: "ignore",
+        });
+
         // Check if resized file exists and is smaller
         if (fs.existsSync(resizedFile) && fs.statSync(resizedFile).size > 0) {
           const resizedBuffer = fs.readFileSync(resizedFile);
           const resizedBase64 = resizedBuffer.toString("base64");
-          
+
           // Cleanup
           try {
             fs.unlinkSync(tmpFile);
             fs.unlinkSync(resizedFile);
-          } catch {}
-          
+          } catch {
+            // Ignore cleanup errors for temp files
+          }
+
           return `data:${mimeType};base64,${resizedBase64}`;
         }
       } catch {
@@ -155,8 +169,10 @@ export function MediaPreview({
       try {
         fs.unlinkSync(tmpFile);
         if (fs.existsSync(resizedFile)) fs.unlinkSync(resizedFile);
-      } catch {}
-      
+      } catch {
+        // Ignore cleanup errors for temp files
+      }
+
       return mediaData;
     } catch {
       return mediaData;

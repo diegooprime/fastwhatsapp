@@ -118,9 +118,7 @@ func (s *AppStore) UpdatePushName(jid, pushName string) error {
 // Display name precedence: name, then push_name, then number.
 // JIDs are returned in API format via toAPIJIDString.
 func (s *AppStore) GetContacts() ([]Contact, error) {
-	// Query non-group chats LEFT JOIN contacts to return all known individuals.
-	// This ensures contacts appear even if the contacts table has no entry yet
-	// (whatsmeow doesn't always provide display names from HistorySync).
+	// Query all chats (individuals + groups) LEFT JOIN contacts for display names.
 	rows, err := s.db.Query(`
 		SELECT ch.jid,
 			COALESCE(NULLIF(ct.name, ''), NULLIF(ct.push_name, ''), NULLIF(ch.name, ''),
@@ -130,8 +128,7 @@ func (s *AppStore) GetContacts() ([]Contact, error) {
 			ch.is_group
 		FROM chats ch
 		LEFT JOIN contacts ct ON ch.jid = ct.jid
-		WHERE ch.is_group = 0
-			AND ch.jid NOT LIKE '%@lid'
+		WHERE ch.jid NOT LIKE '%@lid'
 			AND ch.jid NOT LIKE '%@broadcast'
 		ORDER BY display_name COLLATE NOCASE ASC
 	`)
@@ -159,6 +156,19 @@ func (s *AppStore) GetContacts() ([]Contact, error) {
 		return nil, fmt.Errorf("iterate contacts: %w", err)
 	}
 	return contacts, nil
+}
+
+// GetContactName returns the best display name for a contact JID.
+func (s *AppStore) GetContactName(jid string) (string, error) {
+	var name string
+	err := s.db.QueryRow(`
+		SELECT COALESCE(NULLIF(name, ''), NULLIF(push_name, ''), '')
+		FROM contacts WHERE jid = ?
+	`, jid).Scan(&name)
+	if err != nil {
+		return "", err
+	}
+	return name, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -262,6 +272,16 @@ func (s *AppStore) SetUnread(chatJID string, count int) error {
 	return nil
 }
 
+// ResetAllUnread sets all chats' unread count to zero.
+// Called on connect so that history sync provides the authoritative counts.
+func (s *AppStore) ResetAllUnread() error {
+	_, err := s.db.Exec(`UPDATE chats SET unread_count = 0, updated_at = ?`, time.Now().Unix())
+	if err != nil {
+		return fmt.Errorf("reset all unread: %w", err)
+	}
+	return nil
+}
+
 // MarkRead resets the unread count for a chat to zero.
 func (s *AppStore) MarkRead(chatJID string) error {
 	_, err := s.db.Exec(`
@@ -332,20 +352,33 @@ func (s *AppStore) UpsertMessage(id, chatJID, senderJID, senderName string, from
 func (s *AppStore) GetMessages(chatJID string, limit int, beforeTs int64) ([]Message, error) {
 	var rows *sql.Rows
 	var err error
+	// Resolve sender names: direct JID match first, then push_name→contact fallback
+	nameCoalesce := `IFNULL(COALESCE(
+				NULLIF(ct.name, ''), NULLIF(ct.push_name, ''),
+				(SELECT NULLIF(c2.name, '') FROM contacts c2 WHERE c2.push_name = m.sender_name AND c2.push_name != '' LIMIT 1),
+				NULLIF(m.sender_name, ''),
+				(SELECT NULLIF(m2.sender_name, '') FROM messages m2 WHERE m2.sender_jid = m.sender_jid AND m2.sender_name != '' LIMIT 1)
+			), '')`
 	if beforeTs > 0 {
 		rows, err = s.db.Query(`
-			SELECT id, sender_jid, sender_name, from_me, body, timestamp, has_media, media_type
-			FROM messages
-			WHERE chat_jid = ? AND timestamp <= ?
-			ORDER BY timestamp DESC
+			SELECT m.id, m.sender_jid,
+				`+nameCoalesce+` AS sender_name,
+				m.from_me, m.body, m.timestamp, m.has_media, m.media_type
+			FROM messages m
+			LEFT JOIN contacts ct ON ct.jid = m.sender_jid
+			WHERE m.chat_jid = ? AND m.timestamp <= ?
+			ORDER BY m.timestamp DESC
 			LIMIT ?
 		`, chatJID, beforeTs, limit)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, sender_jid, sender_name, from_me, body, timestamp, has_media, media_type
-			FROM messages
-			WHERE chat_jid = ?
-			ORDER BY timestamp DESC
+			SELECT m.id, m.sender_jid,
+				`+nameCoalesce+` AS sender_name,
+				m.from_me, m.body, m.timestamp, m.has_media, m.media_type
+			FROM messages m
+			LEFT JOIN contacts ct ON ct.jid = m.sender_jid
+			WHERE m.chat_jid = ?
+			ORDER BY m.timestamp DESC
 			LIMIT ?
 		`, chatJID, limit)
 	}
@@ -482,6 +515,45 @@ func (s *AppStore) GetTotalMessageCount() (int, error) {
 		return 0, fmt.Errorf("count total messages: %w", err)
 	}
 	return count, nil
+}
+
+// ---------------------------------------------------------------------------
+// Sync State
+// ---------------------------------------------------------------------------
+
+// SetSyncState stores a key-value pair in the sync_state table.
+func (s *AppStore) SetSyncState(key, value string) {
+	_, err := s.db.Exec(`
+		INSERT INTO sync_state (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`, key, value)
+	if err != nil {
+		log.Printf("Error setting sync state %s: %v", key, err)
+	}
+}
+
+// GetSyncState retrieves a value from the sync_state table.
+func (s *AppStore) GetSyncState(key string) (string, error) {
+	var value string
+	err := s.db.QueryRow(`SELECT value FROM sync_state WHERE key = ?`, key).Scan(&value)
+	if err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+// GetOfflineGap returns the duration between last disconnect and now.
+// Returns 0 if no disconnect timestamp is recorded.
+func (s *AppStore) GetOfflineGap() (time.Duration, error) {
+	tsStr, err := s.GetSyncState("last_disconnected_at")
+	if err != nil {
+		return 0, err
+	}
+	var ts int64
+	if _, err := fmt.Sscanf(tsStr, "%d", &ts); err != nil {
+		return 0, err
+	}
+	return time.Since(time.Unix(ts, 0)), nil
 }
 
 // SearchMessages performs full-text search across all messages using the FTS5 index.

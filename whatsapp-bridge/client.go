@@ -21,11 +21,13 @@ import (
 // WAClient manages the whatsmeow client lifecycle including connection,
 // QR code authentication, and reconnection.
 type WAClient struct {
-	client *whatsmeow.Client
-	status ConnectionStatus
-	qrCode *string
-	mu     sync.RWMutex
-	store  *AppStore
+	client       *whatsmeow.Client
+	status       ConnectionStatus
+	qrCode       *string
+	mu           sync.RWMutex
+	store        *AppStore
+	handlerOnce  sync.Once
+	reconnecting sync.Mutex // prevents concurrent reconnect goroutines
 }
 
 // NewWAClient initialises a WAClient backed by a SQLite session store at
@@ -69,7 +71,10 @@ func NewWAClient(appStore *AppStore) (*WAClient, error) {
 // Connect starts the WhatsApp connection. If the device is not yet paired it
 // presents a QR code flow; otherwise it reconnects using the stored session.
 func (wc *WAClient) Connect() error {
-	wc.client.AddEventHandler(wc.handleEvent)
+	// Only register event handler once (Connect is also called on reconnect)
+	wc.handlerOnce.Do(func() {
+		wc.client.AddEventHandler(wc.handleEvent)
+	})
 
 	if wc.client.Store.ID == nil {
 		// First-time pairing: QR code flow
@@ -128,14 +133,31 @@ func (wc *WAClient) Disconnect() {
 	wc.setStatus(StatusDisconnected)
 }
 
-// GetStatus returns the current connection status.
+// GetStatus returns the current connection status including offline gap info.
 func (wc *WAClient) GetStatus() StatusResponse {
 	wc.mu.RLock()
 	defer wc.mu.RUnlock()
-	return StatusResponse{
+	resp := StatusResponse{
 		Status: wc.status,
 		Ready:  wc.status == StatusReady,
 	}
+	if ts, err := wc.store.GetSyncState("last_connected_at"); err == nil {
+		var v int64
+		if _, err := fmt.Sscanf(ts, "%d", &v); err == nil {
+			resp.LastConnectedAt = &v
+		}
+	}
+	if ts, err := wc.store.GetSyncState("last_disconnected_at"); err == nil {
+		var v int64
+		if _, err := fmt.Sscanf(ts, "%d", &v); err == nil {
+			resp.LastDisconnectedAt = &v
+		}
+	}
+	if resp.LastDisconnectedAt != nil && resp.LastConnectedAt != nil && *resp.LastConnectedAt > *resp.LastDisconnectedAt {
+		gap := *resp.LastConnectedAt - *resp.LastDisconnectedAt
+		resp.OfflineGapSecs = &gap
+	}
+	return resp
 }
 
 // GetQR returns a QR response. When a QR code is available the response
@@ -176,7 +198,14 @@ func (wc *WAClient) setStatus(s ConnectionStatus) {
 }
 
 // reconnect performs a single disconnect-sleep-connect cycle.
+// The mutex prevents concurrent reconnects (e.g. StreamReplaced → Disconnect → Disconnected).
 func (wc *WAClient) reconnect() {
+	if !wc.reconnecting.TryLock() {
+		log.Printf("Reconnect already in progress, skipping")
+		return
+	}
+	defer wc.reconnecting.Unlock()
+
 	wc.client.Disconnect()
 	wc.setStatus(StatusDisconnected)
 	log.Printf("Reconnecting in 5 seconds...")
@@ -226,6 +255,27 @@ func (wc *WAClient) RequestHistorySync(ctx context.Context, chatJID string, coun
 		return fmt.Errorf("send history sync request: %w", err)
 	}
 	log.Printf("Requested %d messages before oldest in %s (anchor: %s at %d)", count, chatJID, oldest.RawMsgID, oldest.Ts)
+	return nil
+}
+
+// RequestRecentMessages requests the most recent messages for a chat by
+// anchoring at the current time. Unlike RequestHistorySync which pages
+// backwards from the oldest message, this always fetches the latest messages.
+func (wc *WAClient) RequestRecentMessages(ctx context.Context, chatJID string, count int) error {
+	msgInfo := &types.MessageInfo{
+		MessageSource: types.MessageSource{
+			Chat:     parseAPIJID(toAPIJIDString(chatJID)),
+			IsFromMe: true,
+		},
+		ID:        "FFFFFFFFFFFFFFFFFFFFFFFF",
+		Timestamp: time.Now(),
+	}
+	req := wc.client.BuildHistorySyncRequest(msgInfo, count)
+	_, err := wc.client.SendPeerMessage(ctx, req)
+	if err != nil {
+		return fmt.Errorf("request recent messages: %w", err)
+	}
+	log.Printf("Requested %d recent messages for %s (now anchor)", count, chatJID)
 	return nil
 }
 
@@ -296,7 +346,9 @@ func (wc *WAClient) DeepSync() {
 		rounds := 0
 		lastCount := beforeCount
 
-		for staleRounds < 2 && rounds < 30 {
+		// Reduced from 30 to 5 — phone often ignores on-demand sync requests (whatsmeow #654).
+		// Exit after 1 stale round (was 2) since no response likely means phone won't respond.
+		for staleRounds < 1 && rounds < 5 {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			err := wc.RequestHistorySync(ctx, jid, 50)
 			cancel()

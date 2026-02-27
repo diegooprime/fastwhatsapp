@@ -49,7 +49,10 @@ export default function Command() {
       const allChats = await api.getChats();
       const unread = allChats
         .filter((c) => c.unreadCount > 0)
-        .sort((a, b) => (b.lastMessageTimestamp ?? 0) - (a.lastMessageTimestamp ?? 0));
+        .sort(
+          (a, b) =>
+            (b.lastMessageTimestamp ?? 0) - (a.lastMessageTimestamp ?? 0),
+        );
       setChats(unread);
     } catch (error) {
       showToast({
@@ -66,6 +69,13 @@ export default function Command() {
     checkStatus();
   }, [checkStatus]);
 
+  // Auto-refresh inbox every 15s to pick up read receipts and new messages
+  useEffect(() => {
+    if (status !== "ready") return;
+    const interval = setInterval(() => loadChats(), 15000);
+    return () => clearInterval(interval);
+  }, [status]);
+
   function formatTime(timestamp?: number): string {
     if (!timestamp) return "";
     const date = new Date(timestamp * 1000);
@@ -73,11 +83,13 @@ export default function Command() {
     const isToday = date.toDateString() === now.toDateString();
 
     if (isToday) {
-      return date.toLocaleTimeString([], {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      }).toLowerCase();
+      return date
+        .toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        })
+        .toLowerCase();
     }
 
     const yesterday = new Date(now);
@@ -103,6 +115,9 @@ export default function Command() {
       // Silent fail — not critical
     });
 
+    // Remove from inbox immediately for snappy UX
+    setChats((prev) => prev.filter((c) => c.id !== chat.id));
+
     push(
       <ChatView
         contact={{
@@ -111,8 +126,28 @@ export default function Command() {
           number: chat.id.split("@")[0],
           isGroup: chat.isGroup,
         }}
-      />
+      />,
     );
+  }
+
+  async function markAsRead(chat: Chat) {
+    try {
+      await api.markRead(chat.id);
+      setChats((prev) => prev.filter((c) => c.id !== chat.id));
+      showToast({ style: Toast.Style.Success, title: `${chat.name} marked as read` });
+    } catch {
+      showToast({ style: Toast.Style.Failure, title: "Failed to mark as read" });
+    }
+  }
+
+  async function markAllAsRead() {
+    try {
+      await Promise.all(chats.map((c) => api.markRead(c.id)));
+      setChats([]);
+      showToast({ style: Toast.Style.Success, title: "All marked as read" });
+    } catch {
+      showToast({ style: Toast.Style.Failure, title: "Failed to mark all as read" });
+    }
   }
 
   // Not connected
@@ -150,7 +185,10 @@ export default function Command() {
                 title="Refresh Status"
                 icon={Icon.ArrowClockwise}
                 onAction={() => {
-                  showToast({ style: Toast.Style.Animated, title: "Checking connection..." });
+                  showToast({
+                    style: Toast.Style.Animated,
+                    title: "Checking connection...",
+                  });
                   checkStatus();
                 }}
               />
@@ -162,10 +200,7 @@ export default function Command() {
   }
 
   return (
-    <List
-      isLoading={isLoading}
-      searchBarPlaceholder="Filter unread chats..."
-    >
+    <List isLoading={isLoading} searchBarPlaceholder="Filter unread chats...">
       {chats.length === 0 && !isLoading ? (
         <List.EmptyView
           icon={Icon.CheckCircle}
@@ -189,7 +224,9 @@ export default function Command() {
           <List.Item
             key={chat.id}
             title={chat.name}
-            subtitle={chat.lastMessage ? truncate(chat.lastMessage, 60) : undefined}
+            subtitle={
+              chat.lastMessage ? truncate(chat.lastMessage, 60) : undefined
+            }
             icon={chat.isGroup ? Icon.TwoPeople : Icon.Person}
             accessories={[
               {
@@ -208,6 +245,18 @@ export default function Command() {
                   title="Open Chat"
                   icon={Icon.Message}
                   onAction={() => openChatAndMarkRead(chat)}
+                />
+                <Action
+                  title="Mark as Read"
+                  icon={Icon.CheckCircle}
+                  shortcut={{ modifiers: ["cmd"], key: "d" }}
+                  onAction={() => markAsRead(chat)}
+                />
+                <Action
+                  title="Mark All as Read"
+                  icon={Icon.CheckCircle}
+                  shortcut={{ modifiers: ["cmd", "shift"], key: "d" }}
+                  onAction={markAllAsRead}
                 />
                 <Action
                   title="Refresh"

@@ -24,6 +24,8 @@ declare namespace Preferences {
   export type Index = ExtensionPreferences & {}
   /** Preferences accessible in the `inbox` command */
   export type Inbox = ExtensionPreferences & {}
+  /** Preferences accessible in the `search` command */
+  export type Search = ExtensionPreferences & {}
 }
 
 declare namespace Arguments {
@@ -31,5 +33,7 @@ declare namespace Arguments {
   export type Index = {}
   /** Arguments passed to the `inbox` command */
   export type Inbox = {}
+  /** Arguments passed to the `search` command */
+  export type Search = {}
 }
 

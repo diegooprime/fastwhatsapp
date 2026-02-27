@@ -167,9 +167,7 @@ export function QRCodeView({ onAuthenticated }: QRCodeViewProps) {
     }
   };
 
-  const markdown = qrCode
-    ? `![](${qrCode})`
-    : isLoading ? "" : "QR code not available";
+  const markdown = qrCode ? `![](${qrCode})` : isLoading ? "" : message;
 
   return (
     <Detail

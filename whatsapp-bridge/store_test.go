@@ -263,6 +263,412 @@ func TestGetMessageCount(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// GetContactName
+// ---------------------------------------------------------------------------
+
+func TestGetContactName_ReturnsName(t *testing.T) {
+	store := newTestStore(t)
+	store.UpsertContact("10000000001@s.whatsapp.net", "Alice Smith", "Ali", "10000000001", false)
+
+	name, err := store.GetContactName("10000000001@s.whatsapp.net")
+	if err != nil {
+		t.Fatalf("GetContactName: %v", err)
+	}
+	if name != "Alice Smith" {
+		t.Errorf("GetContactName = %q, want %q", name, "Alice Smith")
+	}
+}
+
+func TestGetContactName_FallbackToPushName(t *testing.T) {
+	store := newTestStore(t)
+	// Insert a contact with empty name but valid push_name
+	store.UpsertContact("10000000002@s.whatsapp.net", "", "PushAlice", "10000000002", false)
+
+	name, err := store.GetContactName("10000000002@s.whatsapp.net")
+	if err != nil {
+		t.Fatalf("GetContactName: %v", err)
+	}
+	if name != "PushAlice" {
+		t.Errorf("GetContactName = %q, want %q", name, "PushAlice")
+	}
+}
+
+func TestGetContactName_NotFound(t *testing.T) {
+	store := newTestStore(t)
+
+	_, err := store.GetContactName("99999999999@s.whatsapp.net")
+	if err == nil {
+		t.Error("GetContactName should return error for missing contact")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GetContacts includes groups
+// ---------------------------------------------------------------------------
+
+func TestGetContacts_IncludesGroups(t *testing.T) {
+	store := newTestStore(t)
+
+	// Insert an individual chat
+	store.UpsertChat("10000000001@s.whatsapp.net", "Alice", false, nil, nil)
+	store.UpsertContact("10000000001@s.whatsapp.net", "Alice Smith", "", "10000000001", false)
+
+	// Insert a group chat
+	store.UpsertChat("120363000000000001@g.us", "Family Group", true, nil, nil)
+
+	contacts, err := store.GetContacts()
+	if err != nil {
+		t.Fatalf("GetContacts: %v", err)
+	}
+	if len(contacts) != 2 {
+		t.Fatalf("GetContacts: got %d, want 2", len(contacts))
+	}
+
+	// Find each by their API JID and verify isGroup flags
+	var foundIndividual, foundGroup bool
+	for _, c := range contacts {
+		if c.ID == "10000000001@c.us" {
+			foundIndividual = true
+			if c.IsGroup {
+				t.Error("individual contact should have IsGroup=false")
+			}
+			if c.Name != "Alice Smith" {
+				t.Errorf("individual name = %q, want %q", c.Name, "Alice Smith")
+			}
+		}
+		if c.ID == "120363000000000001@g.us" {
+			foundGroup = true
+			if !c.IsGroup {
+				t.Error("group contact should have IsGroup=true")
+			}
+			if c.Name != "Family Group" {
+				t.Errorf("group name = %q, want %q", c.Name, "Family Group")
+			}
+		}
+	}
+	if !foundIndividual {
+		t.Error("individual contact not found in GetContacts results")
+	}
+	if !foundGroup {
+		t.Error("group contact not found in GetContacts results")
+	}
+}
+
+func TestGetContacts_ExcludesLidAndBroadcast(t *testing.T) {
+	store := newTestStore(t)
+
+	store.UpsertChat("10000000001@s.whatsapp.net", "Alice", false, nil, nil)
+	store.UpsertChat("1234@lid", "LID User", false, nil, nil)
+	store.UpsertChat("status@broadcast", "Status", false, nil, nil)
+
+	contacts, err := store.GetContacts()
+	if err != nil {
+		t.Fatalf("GetContacts: %v", err)
+	}
+	if len(contacts) != 1 {
+		t.Fatalf("GetContacts: got %d, want 1 (should exclude @lid and @broadcast)", len(contacts))
+	}
+	if contacts[0].ID != "10000000001@c.us" {
+		t.Errorf("unexpected contact ID %q", contacts[0].ID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GetMessages name resolution via SQL
+// ---------------------------------------------------------------------------
+
+func TestGetMessages_ResolvesContactName(t *testing.T) {
+	store := newTestStore(t)
+	chatJID := "120363000000000001@g.us"
+	senderJID := "10000000099@s.whatsapp.net"
+
+	// Insert a contact with a proper name
+	store.UpsertContact(senderJID, "Bob Johnson", "", "10000000099", false)
+
+	// Insert a message from that sender
+	store.UpsertMessage(
+		"false_120363000000000001@g.us_MSG1",
+		chatJID, senderJID, "", false,
+		"hello from bob", 1700000001, false, nil, nil,
+	)
+
+	msgs, err := store.GetMessages(chatJID, 10, 0)
+	if err != nil {
+		t.Fatalf("GetMessages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if msgs[0].SenderName == nil {
+		t.Fatal("SenderName is nil, expected contact name resolution")
+	}
+	if *msgs[0].SenderName != "Bob Johnson" {
+		t.Errorf("SenderName = %q, want %q", *msgs[0].SenderName, "Bob Johnson")
+	}
+}
+
+func TestGetMessages_PushNameFallbackToContactName(t *testing.T) {
+	store := newTestStore(t)
+	chatJID := "120363000000000001@g.us"
+	senderJID := "10000000088@s.whatsapp.net"
+
+	// A contact where push_name is ":)" but name is the real name "Bucanero"
+	store.UpsertContact(senderJID, "Bucanero", ":)", "10000000088", false)
+
+	// Message with sender_name ":)" (the push name) -- the SQL should resolve
+	// via the direct JID match to "Bucanero" (the contact name)
+	store.UpsertMessage(
+		"false_120363000000000001@g.us_MSG2",
+		chatJID, senderJID, ":)", false,
+		"hola", 1700000002, false, nil, nil,
+	)
+
+	msgs, err := store.GetMessages(chatJID, 10, 0)
+	if err != nil {
+		t.Fatalf("GetMessages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if msgs[0].SenderName == nil {
+		t.Fatal("SenderName is nil")
+	}
+	if *msgs[0].SenderName != "Bucanero" {
+		t.Errorf("SenderName = %q, want %q (should resolve push_name to contact name)", *msgs[0].SenderName, "Bucanero")
+	}
+}
+
+func TestGetMessages_PushNameFallbackViaSubquery(t *testing.T) {
+	store := newTestStore(t)
+	chatJID := "120363000000000001@g.us"
+	senderJID := "10000000077@s.whatsapp.net"
+
+	// Contact has no direct JID match, but push_name matches a contact row
+	// This tests the "(SELECT c2.name FROM contacts c2 WHERE c2.push_name = m.sender_name)" fallback
+	store.UpsertContact("10000000077@s.whatsapp.net", "Real Name", "NickPush", "10000000077", false)
+
+	// Message whose sender_name is "NickPush" but sender_jid matches the contact
+	store.UpsertMessage(
+		"false_120363000000000001@g.us_MSG3",
+		chatJID, senderJID, "NickPush", false,
+		"test push fallback", 1700000003, false, nil, nil,
+	)
+
+	msgs, err := store.GetMessages(chatJID, 10, 0)
+	if err != nil {
+		t.Fatalf("GetMessages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if msgs[0].SenderName == nil {
+		t.Fatal("SenderName is nil")
+	}
+	// Direct JID match finds "Real Name" first
+	if *msgs[0].SenderName != "Real Name" {
+		t.Errorf("SenderName = %q, want %q", *msgs[0].SenderName, "Real Name")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GetMessages sender name fallback from other messages with same sender_jid
+// ---------------------------------------------------------------------------
+
+func TestGetMessages_FallbackFromOtherMessages(t *testing.T) {
+	store := newTestStore(t)
+	chatJID := "120363000000000001@g.us"
+	senderJID := "10000000066@s.whatsapp.net"
+
+	// No contact entry for this sender. Two messages: one with a name, one without.
+	store.UpsertMessage(
+		"false_120363000000000001@g.us_MSG_WITH_NAME",
+		chatJID, senderJID, "Charlie", false,
+		"I have a name", 1700000010, false, nil, nil,
+	)
+	store.UpsertMessage(
+		"false_120363000000000001@g.us_MSG_NO_NAME",
+		chatJID, senderJID, "", false,
+		"I have no name", 1700000011, false, nil, nil,
+	)
+
+	msgs, err := store.GetMessages(chatJID, 10, 0)
+	if err != nil {
+		t.Fatalf("GetMessages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("got %d messages, want 2", len(msgs))
+	}
+
+	// Both messages should resolve to "Charlie" via the message-based fallback
+	for _, m := range msgs {
+		if m.SenderName == nil {
+			t.Errorf("message %q has nil SenderName, expected %q", m.ID, "Charlie")
+			continue
+		}
+		if *m.SenderName != "Charlie" {
+			t.Errorf("message %q SenderName = %q, want %q", m.ID, *m.SenderName, "Charlie")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// UpsertMessage for sent text (simulates handleSend DB storage)
+// ---------------------------------------------------------------------------
+
+func TestUpsertMessage_SentTextStoredInDB(t *testing.T) {
+	store := newTestStore(t)
+	chatJID := "10000000001@s.whatsapp.net"
+	senderJID := "10000000099@s.whatsapp.net"
+	msgID := "true_10000000001@c.us_SENT_MSG_1"
+	body := "Hello, this is a sent message"
+	now := int64(1700000100)
+
+	// Simulate what handleSend does after successful send
+	err := store.UpsertMessage(
+		msgID, chatJID, senderJID, "", true,
+		body, now, false, nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	// Verify the message is stored
+	msgs, err := store.GetMessages(chatJID, 10, 0)
+	if err != nil {
+		t.Fatalf("GetMessages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if msgs[0].ID != msgID {
+		t.Errorf("message ID = %q, want %q", msgs[0].ID, msgID)
+	}
+	if msgs[0].Body != body {
+		t.Errorf("message body = %q, want %q", msgs[0].Body, body)
+	}
+	if !msgs[0].FromMe {
+		t.Error("message fromMe should be true")
+	}
+	if msgs[0].Timestamp != now {
+		t.Errorf("timestamp = %d, want %d", msgs[0].Timestamp, now)
+	}
+	if msgs[0].HasMedia {
+		t.Error("sent text message should not have media")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// UpsertMessage for sent image (simulates handleSendImage DB storage)
+// ---------------------------------------------------------------------------
+
+func TestUpsertMessage_SentImageStoredInDB(t *testing.T) {
+	store := newTestStore(t)
+	chatJID := "10000000001@s.whatsapp.net"
+	senderJID := "10000000099@s.whatsapp.net"
+	msgID := "true_10000000001@c.us_SENT_IMG_1"
+	caption := "Check this out"
+	now := int64(1700000200)
+	mediaType := "image"
+
+	// Simulate what handleSendImage does after successful send
+	err := store.UpsertMessage(
+		msgID, chatJID, senderJID, "", true,
+		caption, now, true, &mediaType, nil,
+	)
+	if err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	// Verify the message is stored with correct media fields
+	msgs, err := store.GetMessages(chatJID, 10, 0)
+	if err != nil {
+		t.Fatalf("GetMessages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if msgs[0].ID != msgID {
+		t.Errorf("message ID = %q, want %q", msgs[0].ID, msgID)
+	}
+	if msgs[0].Body != caption {
+		t.Errorf("body (caption) = %q, want %q", msgs[0].Body, caption)
+	}
+	if !msgs[0].FromMe {
+		t.Error("sent image fromMe should be true")
+	}
+	if !msgs[0].HasMedia {
+		t.Error("sent image should have has_media=true")
+	}
+	if msgs[0].MediaType == nil {
+		t.Fatal("sent image media_type should not be nil")
+	}
+	if *msgs[0].MediaType != "image" {
+		t.Errorf("media_type = %q, want %q", *msgs[0].MediaType, "image")
+	}
+}
+
+func TestUpsertMessage_SentImageNoCaption(t *testing.T) {
+	store := newTestStore(t)
+	chatJID := "10000000001@s.whatsapp.net"
+	senderJID := "10000000099@s.whatsapp.net"
+	msgID := "true_10000000001@c.us_SENT_IMG_2"
+	now := int64(1700000300)
+	mediaType := "image"
+
+	// Image without caption - body is empty string
+	err := store.UpsertMessage(
+		msgID, chatJID, senderJID, "", true,
+		"", now, true, &mediaType, nil,
+	)
+	if err != nil {
+		t.Fatalf("UpsertMessage: %v", err)
+	}
+
+	msgs, err := store.GetMessages(chatJID, 10, 0)
+	if err != nil {
+		t.Fatalf("GetMessages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("got %d messages, want 1", len(msgs))
+	}
+	if msgs[0].Body != "" {
+		t.Errorf("body should be empty for captionless image, got %q", msgs[0].Body)
+	}
+	if !msgs[0].HasMedia {
+		t.Error("captionless image should still have has_media=true")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// UpdateChatLastMessage (used by handleSend after storing message)
+// ---------------------------------------------------------------------------
+
+func TestUpdateChatLastMessage(t *testing.T) {
+	store := newTestStore(t)
+	chatJID := "10000000001@s.whatsapp.net"
+	store.UpsertChat(chatJID, "Test", false, nil, nil)
+
+	err := store.UpdateChatLastMessage(chatJID, "latest msg", 1700000500)
+	if err != nil {
+		t.Fatalf("UpdateChatLastMessage: %v", err)
+	}
+
+	chats, err := store.GetChats()
+	if err != nil {
+		t.Fatalf("GetChats: %v", err)
+	}
+	if len(chats) != 1 {
+		t.Fatalf("got %d chats, want 1", len(chats))
+	}
+	if chats[0].LastMessage == nil || *chats[0].LastMessage != "latest msg" {
+		t.Errorf("last message mismatch: got %v", chats[0].LastMessage)
+	}
+	if chats[0].LastMessageTimestamp == nil || *chats[0].LastMessageTimestamp != 1700000500 {
+		t.Errorf("last message timestamp mismatch: got %v", chats[0].LastMessageTimestamp)
+	}
+}
+
 // NOTE: SearchMessages requires FTS5 which may not be available in all
 // SQLite builds. SearchMessages is tested via integration tests with the
 // full bridge binary that includes FTS5 support.

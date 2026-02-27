@@ -8,9 +8,8 @@ import {
   Clipboard,
   Form,
   useNavigation,
-  Color,
 } from "@raycast/api";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api, Contact, Message } from "./api";
 import { MediaPreview } from "./media-preview";
 import * as fs from "fs";
@@ -20,9 +19,15 @@ import { execSync } from "child_process";
 
 interface ChatViewProps {
   contact: Contact;
+  highlightMessageId?: string;
+  highlightTimestamp?: number;
 }
 
-export function ChatView({ contact }: ChatViewProps) {
+export function ChatView({
+  contact,
+  highlightMessageId,
+  highlightTimestamp,
+}: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -30,59 +35,146 @@ export function ChatView({ contact }: ChatViewProps) {
   const { push } = useNavigation();
 
   // Load cached messages first (instant), then refresh in background
-  const loadMessages = useCallback(async (forceRefresh = false) => {
-    try {
-      if (forceRefresh) {
-        // User manually requested refresh
-        setIsRefreshing(true);
-        const response = await api.getMessagesRefresh(contact.id, 30);
-        setMessages(response.messages);
-        setIsRefreshing(false);
-        return;
-      }
+  const loadMessages = useCallback(
+    async (forceRefresh = false) => {
+      try {
+        // When navigating from search, show highlighted message first, then load latest
+        if (highlightMessageId && highlightTimestamp && !forceRefresh) {
+          setIsLoading(true);
+          // Load 30 messages ending at the target timestamp (it will be near the top)
+          const response = await api.getMessagesCached(
+            contact.id,
+            30,
+            highlightTimestamp,
+          );
+          const msgs = response.messages;
+          setMessages(msgs);
+          setIsLoading(false);
+          // Find the target message and set selection (messages are newest-first, same as display)
+          const apiIdx = msgs.findIndex(
+            (m: Message) => m.id === highlightMessageId,
+          );
+          if (apiIdx !== -1) {
+            setSelectedIndex(apiIdx);
+          }
+          // Also load latest messages in background so the full conversation is visible
+          try {
+            const latest = await api.getMessagesCached(contact.id, 30);
+            if (latest.messages.length > 0) {
+              setMessages(latest.messages);
+              setSelectedIndex(0);
+            }
+          } catch {
+            // Keep showing highlighted messages if latest fetch fails
+          }
+          return;
+        }
 
-      // First: try to get cached messages (instant)
-      const cached = await api.getMessagesCached(contact.id, 30);
+        if (forceRefresh) {
+          // User manually requested refresh
+          setIsRefreshing(true);
+          const response = await api.getMessagesRefresh(contact.id, 30);
+          setMessages(response.messages);
+          setSelectedIndex(0);
+          setIsRefreshing(false);
+          return;
+        }
 
-      if (cached.messages.length > 0) {
-        // Show cached messages immediately
-        setMessages(cached.messages);
-        setIsLoading(false);
+        // First: try to get cached messages (instant)
+        const cached = await api.getMessagesCached(contact.id, 30);
 
-        // Then refresh in background
-        setIsRefreshing(true);
-        try {
+        if (cached.messages.length > 0) {
+          // Show cached messages immediately
+          setMessages(cached.messages);
+          setIsLoading(false);
+
+          // Then refresh in background
+          setIsRefreshing(true);
+          try {
+            const fresh = await api.getMessagesRefresh(contact.id, 30);
+            setMessages(fresh.messages);
+          } catch {
+            // Background refresh failed - cached data is still shown
+          }
+          setIsRefreshing(false);
+        } else {
+          // No cache - must fetch fresh (first time opening this chat)
+          setIsLoading(true);
           const fresh = await api.getMessagesRefresh(contact.id, 30);
           setMessages(fresh.messages);
-        } catch {
-          // Background refresh failed - cached data is still shown
+          setIsLoading(false);
         }
-        setIsRefreshing(false);
-      } else {
-        // No cache - must fetch fresh (first time opening this chat)
-        setIsLoading(true);
-        const fresh = await api.getMessagesRefresh(contact.id, 30);
-        setMessages(fresh.messages);
+      } catch (error) {
+        showToast({
+          style: Toast.Style.Failure,
+          title: "Failed to load",
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
         setIsLoading(false);
+        setIsRefreshing(false);
       }
-    } catch (error) {
-      showToast({
-        style: Toast.Style.Failure,
-        title: "Failed to load",
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [contact.id]);
+    },
+    [contact.id, highlightMessageId, highlightTimestamp],
+  );
 
   useEffect(() => {
     loadMessages();
   }, [loadMessages]);
 
-  // Messages reversed so index 0 = newest (top)
-  const reversedMessages = [...messages].reverse();
-  const currentMessage = reversedMessages[selectedIndex];
+  // Auto-refresh: poll every 10s — check cache first, then sync from WhatsApp if stale
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const selectedIndexRef = useRef(selectedIndex);
+  selectedIndexRef.current = selectedIndex;
+  const refreshCountRef = useRef(0);
+
+  useEffect(() => {
+    const updateMessages = (fresh: Message[]) => {
+      const selectedMsg = messagesRef.current[selectedIndexRef.current];
+      setMessages(fresh);
+      if (selectedMsg) {
+        const newIdx = fresh.findIndex((m) => m.id === selectedMsg.id);
+        if (newIdx !== -1) setSelectedIndex(newIdx);
+      }
+    };
+
+    const interval = setInterval(async () => {
+      try {
+        // First: quick cached check (instant DB read)
+        const cached = await api.getMessagesCached(contact.id, 30);
+        if (cached.messages.length === 0) return;
+
+        const currentNewest = messagesRef.current[0]?.timestamp ?? 0;
+        const cachedNewest = cached.messages[0]?.timestamp ?? 0;
+
+        if (cachedNewest > currentNewest) {
+          // New messages found in cache — update immediately
+          updateMessages(cached.messages);
+          refreshCountRef.current = 0;
+        } else {
+          // No new cached messages — every 3rd cycle, do a full sync from WhatsApp
+          refreshCountRef.current++;
+          if (refreshCountRef.current >= 5) {
+            refreshCountRef.current = 0;
+            const fresh = await api.getMessagesRefresh(contact.id, 30);
+            if (fresh.messages.length > 0) {
+              const freshNewest = fresh.messages[0]?.timestamp ?? 0;
+              if (freshNewest > currentNewest) {
+                updateMessages(fresh.messages);
+              }
+            }
+          }
+        }
+      } catch {
+        // Silent fail on auto-refresh
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [contact.id]);
+
+  // Messages in newest-first order (API returns DESC) so latest are visible at top
+  const displayMessages = messages;
+  const currentMessage = displayMessages[selectedIndex];
 
   function formatTime(timestamp: number): string {
     const date = new Date(timestamp * 1000);
@@ -90,24 +182,28 @@ export function ChatView({ contact }: ChatViewProps) {
     const isToday = date.toDateString() === now.toDateString();
 
     if (isToday) {
-      return date.toLocaleTimeString([], {
+      return date
+        .toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        })
+        .toLowerCase();
+    }
+
+    return date
+      .toLocaleDateString([], {
+        month: "short",
+        day: "numeric",
         hour: "numeric",
         minute: "2-digit",
         hour12: true,
-      }).toLowerCase();
-    }
-
-    return date.toLocaleDateString([], {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    }).toLowerCase();
+      })
+      .toLowerCase();
   }
 
   function goDown() {
-    if (selectedIndex < reversedMessages.length - 1) {
+    if (selectedIndex < displayMessages.length - 1) {
       setSelectedIndex(selectedIndex + 1);
     }
   }
@@ -151,10 +247,15 @@ export function ChatView({ contact }: ChatViewProps) {
     }
   }
 
-  async function handleImageView(msg: Message): Promise<{ mediaData: string; mediaType: "image" | "sticker" } | null> {
+  async function handleImageView(
+    msg: Message,
+  ): Promise<{ mediaData: string; mediaType: "image" | "sticker" } | null> {
     // If mediaData already exists, use it
     if (msg.mediaData) {
-      return { mediaData: msg.mediaData, mediaType: msg.mediaType as "image" | "sticker" };
+      return {
+        mediaData: msg.mediaData,
+        mediaType: msg.mediaType as "image" | "sticker",
+      };
     }
 
     // Validate message ID
@@ -175,7 +276,12 @@ export function ChatView({ contact }: ChatViewProps) {
     });
 
     try {
-      console.log("Downloading media for message:", msg.id, "fromMe:", msg.fromMe);
+      console.log(
+        "Downloading media for message:",
+        msg.id,
+        "fromMe:",
+        msg.fromMe,
+      );
       const media = await api.downloadMedia(msg.id);
       if (!media || !media.data) {
         toast.style = Toast.Style.Failure;
@@ -185,12 +291,16 @@ export function ChatView({ contact }: ChatViewProps) {
       }
       toast.style = Toast.Style.Success;
       toast.title = "Image loaded";
-      return { mediaData: `data:${media.mimetype};base64,${media.data}`, mediaType: msg.mediaType as "image" | "sticker" };
+      return {
+        mediaData: `data:${media.mimetype};base64,${media.data}`,
+        mediaType: msg.mediaType as "image" | "sticker",
+      };
     } catch (error) {
       toast.style = Toast.Style.Failure;
       toast.title = "Failed to load image";
       const errorMsg = error instanceof Error ? error.message : String(error);
-      toast.message = errorMsg.length > 100 ? errorMsg.slice(0, 100) + "..." : errorMsg;
+      toast.message =
+        errorMsg.length > 100 ? errorMsg.slice(0, 100) + "..." : errorMsg;
       console.error("Image download error for ID:", msg.id, "Error:", error);
       return null;
     }
@@ -208,9 +318,15 @@ export function ChatView({ contact }: ChatViewProps) {
     let md = "";
 
     // Show all messages with current one highlighted
-    reversedMessages.forEach((msg, idx) => {
+    displayMessages.forEach((msg, idx) => {
       const time = formatTime(msg.timestamp);
-      const sender = msg.fromMe ? "You" : (msg.senderName || contact.name).split(" ")[0];
+      const sender = msg.fromMe
+        ? "You"
+        : msg.senderName
+          ? msg.senderName.split(" ")[0]
+          : contact.isGroup
+            ? msg.from.split("@")[0] || "Member"
+            : contact.name.split(" ")[0];
       const isSelected = idx === selectedIndex;
 
       let content = "";
@@ -249,7 +365,7 @@ export function ChatView({ contact }: ChatViewProps) {
 
   const navTitle = isRefreshing
     ? `${contact.name} ↻`
-    : `${contact.name} (${selectedIndex + 1}/${reversedMessages.length})`;
+    : `${contact.name} (${selectedIndex + 1}/${displayMessages.length})`;
 
   return (
     <Detail
@@ -261,39 +377,44 @@ export function ChatView({ contact }: ChatViewProps) {
           <ActionPanel>
             {/* Default action depends on message type */}
             {/* For images/stickers: Enter = View Image (downloads on demand if needed) */}
-            {currentMessage.hasMedia && (currentMessage.mediaType === "image" || currentMessage.mediaType === "sticker") && (
-              <Action
-                title="View Image"
-                icon={Icon.Eye}
-                onAction={async () => {
-                  const result = await handleImageView(currentMessage);
-                  if (result) {
-                    push(
-                      <MediaPreview
-                        mediaData={result.mediaData}
-                        mediaType={result.mediaType}
-                        contactName={contact.name}
-                        timestamp={currentMessage.timestamp}
-                        messageId={currentMessage.id}
-                      />
-                    );
-                  }
-                }}
-              />
-            )}
+            {currentMessage.hasMedia &&
+              (currentMessage.mediaType === "image" ||
+                currentMessage.mediaType === "sticker") && (
+                <Action
+                  title="View Image"
+                  icon={Icon.Eye}
+                  onAction={async () => {
+                    const result = await handleImageView(currentMessage);
+                    if (result) {
+                      push(
+                        <MediaPreview
+                          mediaData={result.mediaData}
+                          mediaType={result.mediaType}
+                          contactName={contact.name}
+                          timestamp={currentMessage.timestamp}
+                          messageId={currentMessage.id}
+                        />,
+                      );
+                    }
+                  }}
+                />
+              )}
 
             {/* For videos: Enter = Open Video */}
-            {currentMessage.hasMedia && currentMessage.mediaType === "video" && (
-              <Action
-                title="Open Video"
-                icon={Icon.Video}
-                onAction={() => handleVideoOpen(currentMessage)}
-              />
-            )}
+            {currentMessage.hasMedia &&
+              currentMessage.mediaType === "video" && (
+                <Action
+                  title="Open Video"
+                  icon={Icon.Video}
+                  onAction={() => handleVideoOpen(currentMessage)}
+                />
+              )}
 
             {/* For text/other messages: Enter = Reply */}
             {!(
-              (currentMessage.hasMedia && (currentMessage.mediaType === "image" || currentMessage.mediaType === "sticker")) ||
+              (currentMessage.hasMedia &&
+                (currentMessage.mediaType === "image" ||
+                  currentMessage.mediaType === "sticker")) ||
               (currentMessage.hasMedia && currentMessage.mediaType === "video")
             ) && (
               <Action.Push
@@ -372,7 +493,11 @@ interface ReplyToMessageProps {
   onSent: () => void;
 }
 
-function ReplyToMessage({ contact, quotedMessage, onSent }: ReplyToMessageProps) {
+function ReplyToMessage({
+  contact,
+  quotedMessage,
+  onSent,
+}: ReplyToMessageProps) {
   const [message, setMessage] = useState("");
   const [isSending, setIsSending] = useState(false);
   const { pop } = useNavigation();

@@ -47,8 +47,11 @@ const (
 )
 
 type StatusResponse struct {
-	Status ConnectionStatus `json:"status"`
-	Ready  bool             `json:"ready"`
+	Status          ConnectionStatus `json:"status"`
+	Ready           bool             `json:"ready"`
+	LastConnectedAt *int64           `json:"lastConnectedAt,omitempty"`
+	LastDisconnectedAt *int64        `json:"lastDisconnectedAt,omitempty"`
+	OfflineGapSecs  *int64           `json:"offlineGapSecs,omitempty"`
 }
 
 type QRResponse struct {

@@ -75,7 +75,7 @@ export default function Command() {
     // Check if contact matches any favorite name, returns the index for ordering
     const getFavoriteIndex = (contact: Contact): number => {
       const index = favoriteNames.findIndex((fav) =>
-        contact.name.toLowerCase().includes(fav)
+        contact.name.toLowerCase().includes(fav),
       );
       return index;
     };
@@ -118,14 +118,16 @@ export default function Command() {
   const goDown = useCallback(() => {
     if (allVisibleIds.length === 0) return;
     const currentIndex = selectedId ? allVisibleIds.indexOf(selectedId) : -1;
-    const nextIndex = currentIndex < allVisibleIds.length - 1 ? currentIndex + 1 : 0;
+    const nextIndex =
+      currentIndex < allVisibleIds.length - 1 ? currentIndex + 1 : 0;
     setSelectedId(allVisibleIds[nextIndex]);
   }, [allVisibleIds, selectedId]);
 
   const goUp = useCallback(() => {
     if (allVisibleIds.length === 0) return;
     const currentIndex = selectedId ? allVisibleIds.indexOf(selectedId) : 0;
-    const prevIndex = currentIndex > 0 ? currentIndex - 1 : allVisibleIds.length - 1;
+    const prevIndex =
+      currentIndex > 0 ? currentIndex - 1 : allVisibleIds.length - 1;
     setSelectedId(allVisibleIds[prevIndex]);
   }, [allVisibleIds, selectedId]);
 
@@ -169,8 +171,8 @@ export default function Command() {
         <List.EmptyView
           icon={status === "connecting" ? Icon.Clock : Icon.XMarkCircle}
           title={
-            status === "qr" 
-              ? "QR Code Available" 
+            status === "qr"
+              ? "QR Code Available"
               : status === "connecting"
                 ? "Connecting..."
                 : "WhatsApp Not Connected"
@@ -197,7 +199,10 @@ export default function Command() {
                 title="Refresh Status"
                 icon={Icon.ArrowClockwise}
                 onAction={() => {
-                  showToast({ style: Toast.Style.Animated, title: "Checking connection..." });
+                  showToast({
+                    style: Toast.Style.Animated,
+                    title: "Checking connection...",
+                  });
                   checkStatus();
                 }}
               />

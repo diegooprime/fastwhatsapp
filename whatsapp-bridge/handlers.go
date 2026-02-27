@@ -131,6 +131,30 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	// Convert API JID to internal format for DB queries
 	internalJID := toInternalJID(chatID)
 
+	refresh := r.URL.Query().Get("refresh") == "true"
+
+	if refresh {
+		// Request recent messages from WhatsApp, wait for them to arrive
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		countBefore, _ := s.store.GetMessageCount(internalJID)
+		if err := s.wc.RequestRecentMessages(ctx, internalJID, limit); err != nil {
+			log.Printf("refresh request failed for %s: %v", chatID, err)
+			// Fall through to return cached data
+		} else {
+			// Poll briefly for new messages to arrive via HistorySync
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				time.Sleep(500 * time.Millisecond)
+				countAfter, _ := s.store.GetMessageCount(internalJID)
+				if countAfter > countBefore {
+					break // New messages arrived
+				}
+			}
+		}
+	}
+
 	messages, err := s.store.GetMessages(internalJID, limit, beforeTs)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("get messages: %v", err))
@@ -139,7 +163,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	resp := MessagesResponse{
 		Messages:  messages,
-		FromCache: true,
+		FromCache: !refresh,
 	}
 
 	if len(messages) == 0 {
@@ -247,6 +271,29 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	formattedID := formatMessageID(true, toAPIJID(chatJID), resp.ID)
+
+	// Store sent message in DB immediately (don't rely on echo event)
+	internalChatJID := toInternalJID(req.ChatID)
+	senderJID := ""
+	if s.wc.client.Store.ID != nil {
+		senderJID = s.wc.client.Store.ID.String()
+	}
+	now := resp.Timestamp.Unix()
+	if err := s.store.UpsertMessage(
+		formattedID, internalChatJID, senderJID, "", true,
+		req.Message, now, false, nil, nil,
+	); err != nil {
+		log.Printf("Error storing sent message: %v", err)
+	}
+	// Update chat last message
+	preview := req.Message
+	if len(preview) > 100 {
+		preview = preview[:100] + "..."
+	}
+	if err := s.store.UpdateChatLastMessage(internalChatJID, preview, now); err != nil {
+		log.Printf("Error updating chat last message: %v", err)
+	}
+
 	writeJSON(w, map[string]interface{}{
 		"success":   true,
 		"messageId": formattedID,
@@ -314,6 +361,26 @@ func (s *Server) handleSendImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	formattedID := formatMessageID(true, toAPIJID(chatJID), resp.ID)
+
+	// Store sent image in DB immediately
+	internalChatJID := toInternalJID(req.ChatID)
+	senderJID := ""
+	if s.wc.client.Store.ID != nil {
+		senderJID = s.wc.client.Store.ID.String()
+	}
+	now := resp.Timestamp.Unix()
+	caption := ""
+	if req.Caption != nil {
+		caption = *req.Caption
+	}
+	mediaType := "image"
+	if err := s.store.UpsertMessage(
+		formattedID, internalChatJID, senderJID, "", true,
+		caption, now, true, &mediaType, nil,
+	); err != nil {
+		log.Printf("Error storing sent image: %v", err)
+	}
+
 	writeJSON(w, map[string]interface{}{
 		"success":   true,
 		"messageId": formattedID,
