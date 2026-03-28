@@ -126,13 +126,16 @@ export function MediaPreview({
       if (!match) return mediaData;
 
       const [, mimeType, base64Data] = match;
+      // Sanitize extension to prevent shell injection via crafted MIME types
+      const rawExt = (mimeType.split("/")[1] || "png").replace(/[^a-zA-Z0-9]/g, "");
+      const ext = rawExt || "png";
       const tmpFile = path.join(
         os.tmpdir(),
-        `wa-orig-${Date.now()}.${mimeType.split("/")[1] || "png"}`,
+        `wa-orig-${Date.now()}.${ext}`,
       );
       const resizedFile = path.join(
         os.tmpdir(),
-        `wa-resized-${Date.now()}.${mimeType.split("/")[1] || "png"}`,
+        `wa-resized-${Date.now()}.${ext}`,
       );
 
       // Write original image

@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -13,8 +14,7 @@ import (
 var apiKey string
 
 func loadOrCreateAPIKey() error {
-	home, _ := os.UserHomeDir()
-	keyPath := filepath.Join(home, ".whatsapp-raycast", "api-key")
+	keyPath := filepath.Join(dataDir(), "api-key")
 
 	data, err := os.ReadFile(keyPath)
 	if err == nil {
@@ -31,27 +31,30 @@ func loadOrCreateAPIKey() error {
 	}
 	apiKey = hex.EncodeToString(bytes)
 
-	os.MkdirAll(filepath.Dir(keyPath), 0700)
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0700); err != nil {
+		return fmt.Errorf("create API key dir: %w", err)
+	}
 	if err := os.WriteFile(keyPath, []byte(apiKey), 0600); err != nil {
 		return fmt.Errorf("write API key: %w", err)
 	}
 
-	fmt.Printf("Generated new API key: %s\n", apiKey)
+	fmt.Printf("Generated new API key — saved to %s\n", keyPath)
 	return nil
 }
 
 func authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// TODO [HIGH][SECURITY]: /ui bypasses auth and exposes a full chat explorer.
-		// Any local process can access it without an API key. Consider requiring
-		// auth for /ui and passing the key via a query param or session cookie.
-		if r.URL.Path == "/health" || r.URL.Path == "/ui" {
+		if r.URL.Path == "/health" {
 			next.ServeHTTP(w, r)
 			return
 		}
 
+		// Accept API key from header or query param (for /ui browser access)
 		key := r.Header.Get("X-API-Key")
-		if key == "" || key != apiKey {
+		if key == "" {
+			key = r.URL.Query().Get("key")
+		}
+		if key == "" || subtle.ConstantTimeCompare([]byte(key), []byte(apiKey)) != 1 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			w.Write([]byte(`{"error":"Unauthorized: Invalid or missing API key"}`))

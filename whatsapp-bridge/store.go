@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -27,12 +28,7 @@ func boolToInt(b bool) int {
 // NewAppStore opens the database at ~/.whatsapp-raycast/app.db, enables WAL mode
 // with a 5000ms busy timeout, and runs schema migrations.
 func NewAppStore() (*AppStore, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("get home dir: %w", err)
-	}
-
-	dir := filepath.Join(home, ".whatsapp-raycast")
+	dir := dataDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
@@ -560,6 +556,10 @@ func (s *AppStore) GetOfflineGap() (time.Duration, error) {
 // Results are joined with chats/contacts to include chat display name and JID,
 // and ordered by FTS5 relevance rank.
 func (s *AppStore) SearchMessages(query string, limit int) ([]SearchResult, error) {
+	// Escape FTS5 special syntax by wrapping in double quotes (phrase query).
+	// Interior double quotes are doubled per FTS5 escaping rules.
+	safeQuery := `"` + strings.ReplaceAll(query, `"`, `""`) + `"`
+
 	rows, err := s.db.Query(`
 		SELECT m.id, m.sender_jid, m.sender_name, m.from_me, m.body, m.timestamp,
 			m.has_media, m.media_type, m.chat_jid,
@@ -572,7 +572,7 @@ func (s *AppStore) SearchMessages(query string, limit int) ([]SearchResult, erro
 		WHERE messages_fts MATCH ?
 		ORDER BY fts.rank
 		LIMIT ?
-	`, query, limit)
+	`, safeQuery, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search messages: %w", err)
 	}

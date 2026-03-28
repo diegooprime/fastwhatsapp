@@ -63,12 +63,16 @@ func main() {
 	mux.HandleFunc("GET /ui", srv.handleUI)
 	mux.HandleFunc("DELETE /chats/{chatId}", srv.handleDeleteChat)
 
-	// 6. Wrap with auth middleware
-	handler := authMiddleware(mux)
+	// 6. Wrap with auth middleware and body size limit (50MB)
+	handler := http.MaxBytesHandler(authMiddleware(mux), 50<<20)
 
 	// 7. Configure and start HTTP server
+	addr := os.Getenv("BIND_ADDR")
+	if addr == "" {
+		addr = "127.0.0.1:3847"
+	}
 	httpServer := &http.Server{
-		Addr:           "127.0.0.1:3847",
+		Addr:           addr,
 		Handler:        handler,
 		ReadTimeout:    30 * time.Second,
 		WriteTimeout:   60 * time.Second,

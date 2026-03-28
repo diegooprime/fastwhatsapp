@@ -341,9 +341,13 @@ func (wc *WAClient) handleMessage(evt *events.Message) {
 		if err := wc.store.IncrementUnread(chatJID); err != nil {
 			log.Printf("Error incrementing unread for %s: %v", chatJID, err)
 		}
+		// Forward to webhook for AI processing (non-blocking)
+		if body != "" {
+			go forwardToWebhook(chatJID, senderName, body, ts)
+		}
 	}
 
-	log.Printf("Message %s in %s: %s", formattedID, chatJID, truncate(body, 50))
+	log.Printf("Message %s in %s (%d chars)", formattedID, chatJID, len(body))
 }
 
 // handlePushName updates the push name for a contact.
@@ -401,7 +405,10 @@ func (wc *WAClient) populateGroupNames() {
 	var jids []string
 	for rows.Next() {
 		var jid string
-		rows.Scan(&jid)
+		if err := rows.Scan(&jid); err != nil {
+			log.Printf("scan group jid: %v", err)
+			continue
+		}
 		jids = append(jids, jid)
 	}
 
@@ -442,7 +449,10 @@ func (wc *WAClient) backfillGroupSenderNames() {
 	var pairs []lidChat
 	for rows.Next() {
 		var lid, chat string
-		rows.Scan(&lid, &chat)
+		if err := rows.Scan(&lid, &chat); err != nil {
+			log.Printf("scan lid chat: %v", err)
+			continue
+		}
 		pairs = append(pairs, lidChat{lid, chat})
 	}
 
@@ -534,10 +544,11 @@ func (wc *WAClient) syncRecentChats() {
 	log.Printf("syncRecentChats: requested recent messages for %d chats", synced)
 }
 
-// truncate returns at most the first n characters of a string.
+// truncate returns at most the first n runes of a string.
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return s[:n] + "..."
+	return string(runes[:n]) + "..."
 }

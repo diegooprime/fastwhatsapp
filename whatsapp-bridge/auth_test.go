@@ -24,19 +24,50 @@ func TestAuthMiddleware_HealthBypass(t *testing.T) {
 	}
 }
 
-func TestAuthMiddleware_UIBypass(t *testing.T) {
+func TestAuthMiddleware_UIRequiresAuth(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		t.Error("handler should not be called when API key is missing")
 	})
+
+	oldKey := apiKey
+	apiKey = "test-secret-key-123"
+	defer func() { apiKey = oldKey }()
 
 	handler := authMiddleware(inner)
 
+	// /ui without key should be rejected
 	req := httptest.NewRequest("GET", "/ui", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("GET /ui without API key: status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestAuthMiddleware_UIQueryParamKey(t *testing.T) {
+	called := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	oldKey := apiKey
+	apiKey = "test-secret-key-123"
+	defer func() { apiKey = oldKey }()
+
+	handler := authMiddleware(inner)
+
+	// /ui with key in query param should pass
+	req := httptest.NewRequest("GET", "/ui?key=test-secret-key-123", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusOK {
-		t.Errorf("GET /ui without API key: status = %d, want %d", rec.Code, http.StatusOK)
+		t.Errorf("GET /ui with query key: status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !called {
+		t.Error("inner handler was not called with query param API key")
 	}
 }
 

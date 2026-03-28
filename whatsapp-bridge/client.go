@@ -33,12 +33,7 @@ type WAClient struct {
 // NewWAClient initialises a WAClient backed by a SQLite session store at
 // ~/.whatsapp-raycast/whatsmeow.db and the provided application data store.
 func NewWAClient(appStore *AppStore) (*WAClient, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("get home dir: %w", err)
-	}
-
-	dir := filepath.Join(home, ".whatsapp-raycast")
+	dir := dataDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
@@ -374,7 +369,7 @@ func (wc *WAClient) DeepSync() {
 		afterCount, _ := wc.store.GetMessageCount(jid)
 		newMsgs := afterCount - beforeCount
 		status := "complete"
-		if rounds >= 30 {
+		if rounds >= 5 {
 			status = "max_rounds"
 		}
 

@@ -42,14 +42,23 @@ function validateApiKey(req: Request, res: Response, next: NextFunction): void {
     next();
     return;
   }
-  
-  const providedKey = req.headers["x-api-key"];
-  
-  if (!providedKey || providedKey !== API_KEY) {
+
+  const providedKey = req.headers["x-api-key"] as string | undefined;
+
+  if (!providedKey || typeof providedKey !== "string") {
     res.status(401).json({ error: "Unauthorized: Invalid or missing API key" });
     return;
   }
-  
+
+  // Hash both keys so timingSafeEqual always compares equal-length buffers,
+  // avoiding a timing leak on key length.
+  const providedHash = crypto.createHash("sha256").update(providedKey).digest();
+  const expectedHash = crypto.createHash("sha256").update(API_KEY).digest();
+  if (!crypto.timingSafeEqual(providedHash, expectedHash)) {
+    res.status(401).json({ error: "Unauthorized: Invalid or missing API key" });
+    return;
+  }
+
   next();
 }
 
@@ -105,13 +114,14 @@ async function shutdown() {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
-// Prevent crashes from unhandled errors
+// Exit on uncaught errors — process manager (systemd/pm2) handles restarts.
+// Continuing after uncaughtException leaves the process in undefined state.
 process.on("uncaughtException", (error) => {
   console.error("[Server] Uncaught exception:", error.message);
-  // Don't exit - let the WhatsApp client handle reconnection
+  process.exit(1);
 });
 
 process.on("unhandledRejection", (reason) => {
   console.error("[Server] Unhandled rejection:", reason);
-  // Don't exit - let the WhatsApp client handle reconnection
+  process.exit(1);
 });

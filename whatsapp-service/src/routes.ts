@@ -4,6 +4,18 @@ import { messageCache, CachedMessage } from "./cache";
 
 const router = Router();
 
+// Rate limiter: max 30 messages/minute
+const sendRateLimit = { count: 0, window: Date.now() };
+function checkSendRate(): boolean {
+  const now = Date.now();
+  if (now - sendRateLimit.window > 60_000) {
+    sendRateLimit.count = 0;
+    sendRateLimit.window = now;
+  }
+  sendRateLimit.count++;
+  return sendRateLimit.count <= 30;
+}
+
 // GET /status - Check connection status
 router.get("/status", (req: Request, res: Response) => {
   try {
@@ -153,7 +165,11 @@ router.post("/send", async (req: Request, res: Response) => {
       return;
     }
 
-    // TODO [HIGH][SECURITY]: Add rate limiting to prevent message spam and WhatsApp account bans.
+    if (!checkSendRate()) {
+      res.status(429).json({ error: "rate limit exceeded: max 30 messages/minute" });
+      return;
+    }
+
     const MAX_MESSAGE_LEN = 65536; // 64KB
     if (message.length > MAX_MESSAGE_LEN) {
       res.status(400).json({ error: "message too long (max 64KB)" });
@@ -175,6 +191,11 @@ router.post("/send-image", async (req: Request, res: Response) => {
 
     if (!chatId || !base64) {
       res.status(400).json({ error: "chatId and base64 are required" });
+      return;
+    }
+
+    if (!checkSendRate()) {
+      res.status(429).json({ error: "rate limit exceeded: max 30 messages/minute" });
       return;
     }
 

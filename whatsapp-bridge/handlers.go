@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.mau.fi/whatsmeow"
@@ -24,6 +25,28 @@ import (
 type Server struct {
 	wc    *WAClient
 	store *AppStore
+}
+
+// sendRateLimiter tracks message sends to prevent spam and WhatsApp account bans.
+var sendRateLimiter = struct {
+	mu     sync.Mutex
+	count  int
+	window time.Time
+}{}
+
+func checkSendRate() error {
+	sendRateLimiter.mu.Lock()
+	defer sendRateLimiter.mu.Unlock()
+	now := time.Now()
+	if now.Sub(sendRateLimiter.window) > time.Minute {
+		sendRateLimiter.count = 0
+		sendRateLimiter.window = now
+	}
+	sendRateLimiter.count++
+	if sendRateLimiter.count > 30 {
+		return fmt.Errorf("rate limit exceeded: max 30 messages/minute")
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +139,7 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 5000 {
 			limit = parsed
 		}
 	}
@@ -230,8 +253,10 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO [HIGH][SECURITY]: Add rate limiting to prevent message spam and WhatsApp account bans.
-	// Recommended: max 30 messages/minute across all chats, max 5 messages/minute per chat.
+	if err := checkSendRate(); err != nil {
+		writeError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 
 	const maxMessageLen = 65536 // 64KB - WhatsApp's practical limit
 	if len(req.Message) > maxMessageLen {
@@ -312,6 +337,11 @@ func (s *Server) handleSendImage(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ChatID == "" || req.Base64 == "" {
 		writeError(w, http.StatusBadRequest, "chatId and base64 are required")
+		return
+	}
+
+	if err := checkSendRate(); err != nil {
+		writeError(w, http.StatusTooManyRequests, err.Error())
 		return
 	}
 
@@ -665,12 +695,15 @@ func (s *Server) handleDeepSyncStatus(w http.ResponseWriter, r *http.Request) {
 
 var uiTmpl = template.Must(template.New("ui").Parse(uiHTML))
 
-// TODO [HIGH][SECURITY]: The API key is embedded directly in the HTML response.
-// Any browser extension or DevTools can read it. Consider using a session cookie
-// or short-lived token instead of exposing the persistent API key in page source.
 func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
+	// Auth is enforced by middleware (key passed via ?key= query param).
+	// Pass the key through so the UI JS can make authenticated API calls.
+	key := r.Header.Get("X-API-Key")
+	if key == "" {
+		key = r.URL.Query().Get("key")
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	uiTmpl.Execute(w, struct{ APIKey string }{APIKey: apiKey})
+	uiTmpl.Execute(w, struct{ APIKey string }{APIKey: key})
 }
 
 // ---------------------------------------------------------------------------
@@ -686,7 +719,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 200 {
 			limit = parsed
 		}
 	}
